@@ -1,8 +1,28 @@
-
+import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { auth, db } from "./firebase-config";
+import { doc, getDoc } from "firebase/firestore";
 import React, { useState, useEffect } from "react";
 import { getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { getAuth, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
+
+const navigate = useNavigate();
+const [isAdmin, setIsAdmin] = useState(false);
+
+useEffect(() => {
+  const checkAdmin = async () => {
+    const user = auth.currentUser;
+    if (user) {
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().role === "admin") {
+        setIsAdmin(true);
+      }
+    }
+  };
+  checkAdmin();
+}, []);
 
 const Dashboard = () => {
   const [companyName, setCompanyName] = useState("");
@@ -224,6 +244,12 @@ useEffect(() => {
           <p>Submitted VAT Reports</p>
         </div>
       </div>
+
+      {isAdmin && (
+  <button onClick={() => navigate("/add-user")} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
+    ➕ Add New User
+  </button>
+)}
 
 
       {/* ✅ Add Client Form */}
