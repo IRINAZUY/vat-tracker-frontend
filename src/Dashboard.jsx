@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import AddUserButton from "./components/AddUserButton";
-{isAdmin && <AddUserButton />}
 import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth, db } from "./firebase-config";
@@ -37,7 +36,7 @@ const Dashboard = () => {
         }
       }
     };
-  
+        
     checkAdmin();
   }, [user]);
   
@@ -276,11 +275,15 @@ useEffect(() => {
     <div style={{ backgroundColor: "#EEF4E6", minHeight: "100vh", padding: "20px" }}>
       <h2 style={{ color: "#228B22", textAlign: "center" }}>ACCESS ACCOUNTING LLC</h2>
 
-{isAdmin && (
-  <button onClick={handleAddUserClick} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
+      {isAdmin && (
+  <button
+    onClick={() => navigate("/add-user")}
+    style={{ marginBottom: "1rem", padding: "0.5rem" }}
+  >
     ➕ Add New User
   </button>
 )}
+
 
       {/* ✅ Summary Section */}
       <div style={{ display: "flex", justifyContent: "space-around", marginBottom: "20px" }}>
