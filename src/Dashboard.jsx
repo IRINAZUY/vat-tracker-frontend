@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import AddUserButton from "./components/AddUserButton";
 import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth, db } from "./firebase-config";
@@ -21,86 +20,35 @@ const Dashboard = () => {
   const [clients, setClients] = useState([]);
   const [error, setError] = useState("");
   const [editingClient, setEditingClient] = useState(null);
-
   const [user] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
-  const navigate = useNavigate();
-  
-  useEffect(() => {
-    const checkAdmin = async () => {
-      if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists() && userSnap.data().role === "admin") {
-          setIsAdmin(true);
-        }
-      }
-    };
-        
-    checkAdmin();
-  }, [user]);
-  
-  
-  useEffect(() => {
-    const checkAdmin = async () => {
-      if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists() && userSnap.data().role === "admin") {
-          setIsAdmin(true);
-        }
-      }
-    };
-  
-    checkAdmin();
-  }, [user]);
-  
 
-  const auth = getAuth();
-  const db = getFirestore();
-  
+  const navigate = useNavigate();
+
+  // ✅ Check if logged in user is admin
   useEffect(() => {
-    if (!auth.currentUser) {
+    const checkAdmin = async () => {
+      if (user) {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists() && userSnap.data().role === "admin") {
+          setIsAdmin(true);
+        }
+      }
+    };
+    checkAdmin();
+  }, [user]);
+
+  // ✅ Redirect if not logged in
+  useEffect(() => {
+    if (!user) {
       navigate("/");
     } else {
       fetchClients();
     }
-  }, []);
-  useEffect(() => {
-    const updatePendingStatus = async () => {
-      const updatedClients = clients.map(async (client) => {
-        const deadline = new Date(client.submissionDeadline.seconds * 1000);
-        if (isCurrentMonth(deadline) && client.status !== "PENDING") {
-          await updateDoc(doc(db, "clients", client.id), { status: "PENDING" });
-        }
-      });
-  
-      // Wait for all updates to complete
-      await Promise.all(updatedClients);
-      fetchClients(); // Refresh the client list
-    };
-  
-    if (clients.length > 0) {
-      updatePendingStatus();
-    }
-  }, [clients]); // Runs every time clients change
-  
-  // ✅ Fetch clients from Firestore
-  const fetchClients = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, "clients"));
-      const clientList = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+  }, [user]);
 
-      setClients(clientList);
-    } catch (err) {
-      console.error("Error fetching clients:", err);
-      setError("Failed to load clients.");
-    }
-  };
-
+  // ✅ Navigate to add user
   const handleAddUserClick = () => {
     navigate("/add-user");
   };
@@ -277,13 +225,12 @@ useEffect(() => {
 
       {isAdmin && (
   <button
-    onClick={() => navigate("/add-user")}
+    onClick={handleAddUserClick}
     style={{ marginBottom: "1rem", padding: "0.5rem" }}
   >
     ➕ Add New User
   </button>
 )}
-
 
       {/* ✅ Summary Section */}
       <div style={{ display: "flex", justifyContent: "space-around", marginBottom: "20px" }}>
