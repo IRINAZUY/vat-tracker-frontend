@@ -74,11 +74,7 @@ const Dashboard = () => {
     navigate("/add-user");
   };
 
-  {isAdmin && (
-    <button onClick={handleAddUserClick} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
-      ➕ Add New User
-    </button>
-  )}
+  
 
   // ✅ Function to add/update a client
   const handleAddOrUpdateClient = async (e) => {
@@ -233,6 +229,12 @@ useEffect(() => {
   return (
     <div style={{ backgroundColor: "#EEF4E6", minHeight: "100vh", padding: "20px" }}>
       <h2 style={{ color: "#228B22", textAlign: "center" }}>ACCESS ACCOUNTING LLC</h2>
+
+      {isAdmin && (
+    <button onClick={handleAddUserClick} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
+      ➕ Add New User
+    </button>
+  )}
 
       {/* ✅ Summary Section */}
       <div style={{ display: "flex", justifyContent: "space-around", marginBottom: "20px" }}>
