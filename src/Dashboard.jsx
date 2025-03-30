@@ -26,6 +26,36 @@ const Dashboard = () => {
   const [user] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
+  
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (user) {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists() && userSnap.data().role === "admin") {
+          setIsAdmin(true);
+        }
+      }
+    };
+  
+    checkAdmin();
+  }, [user]);
+  
+  
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (user) {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists() && userSnap.data().role === "admin") {
+          setIsAdmin(true);
+        }
+      }
+    };
+  
+    checkAdmin();
+  }, [user]);
+  
 
   const auth = getAuth();
   const db = getFirestore();
