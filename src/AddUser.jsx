@@ -94,4 +94,6 @@ const AddUser = () => {
   );
 };
 
-export default AddUser;
+export default function AddUser() {
+    return <h2>Add New User</h2>;
+  }
