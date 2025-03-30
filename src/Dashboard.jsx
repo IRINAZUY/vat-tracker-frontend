@@ -226,15 +226,29 @@ useEffect(() => {
     return deadlineA - deadlineB; // Sorts by earliest deadline first
   });
 
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const user = auth.currentUser;
+      if (user) {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists() && userSnap.data().role === "admin") {
+          setIsAdmin(true);
+        }
+      }
+    };
+    checkAdmin();
+  }, []);
+  
   return (
     <div style={{ backgroundColor: "#EEF4E6", minHeight: "100vh", padding: "20px" }}>
       <h2 style={{ color: "#228B22", textAlign: "center" }}>ACCESS ACCOUNTING LLC</h2>
 
-      {isAdmin && (
-    <button onClick={handleAddUserClick} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
-      ➕ Add New User
-    </button>
-  )}
+{isAdmin && (
+  <button onClick={handleAddUserClick} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
+    ➕ Add New User
+  </button>
+)}
 
       {/* ✅ Summary Section */}
       <div style={{ display: "flex", justifyContent: "space-around", marginBottom: "20px" }}>

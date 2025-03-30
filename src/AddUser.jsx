@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "./firebase-config";
 import { collection, addDoc, getDocs } from "firebase/firestore";
+import AddUser from "./AddUser";
 
 const AddUser = () => {
   const [email, setEmail] = useState("");
