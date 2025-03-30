@@ -1,5 +1,3 @@
-// Force redeploy
-// Triggerring redeploy
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
@@ -13,27 +11,7 @@ import {
   doc,
   getDoc
 } from "firebase/firestore";
-import { getAuth, signOut } from "firebase/auth";
-const [user] = useAuthState(auth); // This keeps track of the logged-in user
-const [isAdmin, setIsAdmin] = useState(false); // This checks if the user is an admin
-const navigate = useNavigate(); // This lets you go to other pages
-
-useEffect(() => {
-  const checkAdmin = async () => {
-    if (user) {
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists() && userSnap.data().role === "admin") {
-        setIsAdmin(true);
-      }
-    }
-  };
-  checkAdmin();
-}, [user]); // Only runs when user changes
-
-const handleAddUserClick = () => {
-  navigate("/add-user"); // Takes you to the add-user page
-};
+import { signOut } from "firebase/auth";
 
 const Dashboard = () => {
   const [companyName, setCompanyName] = useState("");
@@ -43,10 +21,13 @@ const Dashboard = () => {
   const [error, setError] = useState("");
   const [editingClient, setEditingClient] = useState(null);
 
-  const auth = getAuth();
-  const db = getFirestore();
+  const [user] = useAuthState(auth);
+  const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
 
+  const auth = getAuth();
+  const db = getFirestore();
+  
   useEffect(() => {
     if (!auth.currentUser) {
       navigate("/");
@@ -88,6 +69,16 @@ const Dashboard = () => {
       setError("Failed to load clients.");
     }
   };
+
+  const handleAddUserClick = () => {
+    navigate("/add-user");
+  };
+
+  {isAdmin && (
+    <button onClick={handleAddUserClick} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
+      ➕ Add New User
+    </button>
+  )}
 
   // ✅ Function to add/update a client
   const handleAddOrUpdateClient = async (e) => {
@@ -256,13 +247,6 @@ useEffect(() => {
         </div>
       </div>
 
-      {isAdmin && (
-  <button onClick={() => navigate("/add-user")} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
-    ➕ Add New User
-  </button>
-)}
-
-
       {/* ✅ Add Client Form */}
       <h3>Add a New Client</h3>
       {error && <p style={{ color: "red" }}>{error}</p>}
@@ -344,3 +328,4 @@ useEffect(() => {
 };
 
 export default Dashboard;
+
