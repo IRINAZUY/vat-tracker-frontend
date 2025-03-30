@@ -1,4 +1,10 @@
 import React, { useState, useEffect } from "react";
+import AddUserButton from "./components/AddUserButton";
+
+...
+
+{isAdmin && <AddUserButton />}
+
 import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth, db } from "./firebase-config";
