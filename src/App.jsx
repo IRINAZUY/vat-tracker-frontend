@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Login from './Login';
 import Dashboard from './Dashboard';
-import Signup from "./Signup";
+import Signup from "./Signup.jsx";
 import { auth, db } from "./firebase-config";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { getDoc, doc } from "firebase/firestore";
