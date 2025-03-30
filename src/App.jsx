@@ -1,3 +1,4 @@
+import AddUser from "./AddUser";
 import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Login from './Login';
@@ -29,6 +30,7 @@ const App = () => {
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        {isAdmin && <Route path="/add-user" element={<AddUser />} />}
         <Route
           path="/signup"
           element={isAdmin ? <Signup /> : <Navigate to="/" />}
