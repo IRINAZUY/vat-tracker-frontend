@@ -1,18 +1,20 @@
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth, db } from "./firebase-config";
-import { getDoc, doc } from "firebase/firestore";
-import { useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { auth, db } from "./firebase-config";
-import { doc, getDoc } from "firebase/firestore";
-import React, { useState, useEffect } from "react";
-import { getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  doc,
+  getDoc
+} from "firebase/firestore";
 import { getAuth, signOut } from "firebase/auth";
-import { useNavigate } from "react-router-dom";
-
-const [user] = useAuthState(auth);
-const [isAdmin, setIsAdmin] = useState(false);
-const navigate = useNavigate();
+const [user] = useAuthState(auth); // This keeps track of the logged-in user
+const [isAdmin, setIsAdmin] = useState(false); // This checks if the user is an admin
+const navigate = useNavigate(); // This lets you go to other pages
 
 useEffect(() => {
   const checkAdmin = async () => {
@@ -25,28 +27,11 @@ useEffect(() => {
     }
   };
   checkAdmin();
-}, [user]);
+}, [user]); // Only runs when user changes
 
 const handleAddUserClick = () => {
-  navigate("/add-user");
+  navigate("/add-user"); // Takes you to the add-user page
 };
-
-const navigate = useNavigate();
-const [isAdmin, setIsAdmin] = useState(false);
-
-useEffect(() => {
-  const checkAdmin = async () => {
-    const user = auth.currentUser;
-    if (user) {
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists() && userSnap.data().role === "admin") {
-        setIsAdmin(true);
-      }
-    }
-  };
-  checkAdmin();
-}, []);
 
 const Dashboard = () => {
   const [companyName, setCompanyName] = useState("");
