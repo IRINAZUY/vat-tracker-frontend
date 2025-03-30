@@ -1,3 +1,6 @@
+import { useAuthState } from "react-firebase-hooks/auth";
+import { auth, db } from "./firebase-config";
+import { getDoc, doc } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { auth, db } from "./firebase-config";
@@ -6,6 +9,27 @@ import React, { useState, useEffect } from "react";
 import { getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { getAuth, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
+
+const [user] = useAuthState(auth);
+const [isAdmin, setIsAdmin] = useState(false);
+const navigate = useNavigate();
+
+useEffect(() => {
+  const checkAdmin = async () => {
+    if (user) {
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().role === "admin") {
+        setIsAdmin(true);
+      }
+    }
+  };
+  checkAdmin();
+}, [user]);
+
+const handleAddUserClick = () => {
+  navigate("/add-user");
+};
 
 const navigate = useNavigate();
 const [isAdmin, setIsAdmin] = useState(false);
