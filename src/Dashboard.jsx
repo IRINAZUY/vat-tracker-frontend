@@ -224,10 +224,7 @@ useEffect(() => {
       <h2 style={{ color: "#228B22", textAlign: "center" }}>ACCESS ACCOUNTING LLC</h2>
 
       {isAdmin && (
-  <button
-    onClick={handleAddUserClick}
-    style={{ marginBottom: "1rem", padding: "0.5rem" }}
-  >
+  <button onClick={() => navigate("/add-user")} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
     ➕ Add New User
   </button>
 )}
