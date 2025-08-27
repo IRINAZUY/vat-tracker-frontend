@@ -1,3 +1,4 @@
+// ---- TOP OF FILE (imports) ----
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
@@ -9,10 +10,11 @@ import {
   updateDoc,
   deleteDoc,
   doc,
-  getDoc
+  getDoc,
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 
+// ---- COMPONENT START ----
 const Dashboard = () => {
   const [companyName, setCompanyName] = useState("");
   const [trn, setTrn] = useState("");
@@ -20,10 +22,40 @@ const Dashboard = () => {
   const [clients, setClients] = useState([]);
   const [error, setError] = useState("");
   const [editingClient, setEditingClient] = useState(null);
-  const [user] = useAuthState(auth);
-  const [isAdmin, setIsAdmin] = useState(false);
 
+  // include loading so we can safely wait before queries if needed
+  const [user, loading] = useAuthState(auth);
+
+  const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
+
+  // (Optional but safe) Once auth is ready, check admin flag
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!user) {
+        setIsAdmin(false);
+        return;
+      }
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
+        if (!cancelled) {
+          setIsAdmin(snap.exists() && snap.data().role === "admin");
+        }
+      } catch (e) {
+        console.error("Admin check failed:", e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // ⬅️ stop here. Keep ALL your existing handlers/effects/UI below this line.
+  // Make sure your actual JSX `return (...)` stays at the END of this function.
 
   // ✅ Check if logged in user is admin
   useEffect(() => {
