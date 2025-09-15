@@ -1,84 +1,131 @@
-// ---- TOP OF FILE (imports) ----
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
-import { auth, db } from "./firebase-config";
-import {
-  collection,
-  addDoc,
-  getDocs,
-  updateDoc,
-  deleteDoc,
-  doc,
-  getDoc,
-} from "firebase/firestore";
+import { auth, db } from "./dynamic-firebase-config";
 import { signOut } from "firebase/auth";
+import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc, getDoc } from "firebase/firestore";
+import AccessAccountingLogo from "./assets/ACC_logo.png";
 
-// ---- COMPONENT START ----
-const Dashboard = () => {
+const VatDashboard = () => {
   const [companyName, setCompanyName] = useState("");
   const [trn, setTrn] = useState("");
   const [quarterStart, setQuarterStart] = useState("");
   const [clients, setClients] = useState([]);
   const [error, setError] = useState("");
   const [editingClient, setEditingClient] = useState(null);
-
-  // include loading so we can safely wait before queries if needed
   const [user, loading] = useAuthState(auth);
-
   const [isAdmin, setIsAdmin] = useState(false);
+
   const navigate = useNavigate();
 
-  // (Optional but safe) Once auth is ready, check admin flag
+  // Redirect to login if not authenticated
   useEffect(() => {
-    let cancelled = false;
+    if (!loading && !user) {
+      navigate("/", { replace: true });
+    }
+  }, [user, loading, navigate]);
 
-    (async () => {
-      if (!user) {
-        setIsAdmin(false);
-        return;
-      }
-      try {
-        const userRef = doc(db, "users", user.uid);
-        const snap = await getDoc(userRef);
-        if (!cancelled) {
-          setIsAdmin(snap.exists() && snap.data().role === "admin");
-        }
-      } catch (e) {
-        console.error("Admin check failed:", e);
-      }
-    })();
+  // Show loading state while checking authentication
+  if (loading) {
+    return (
+      <div style={{ backgroundColor: "#EEF4E6", minHeight: "100vh", padding: "20px", textAlign: "center" }}>
+        <h2 style={{ color: "#228B22" }}>Loading VAT Dashboard...</h2>
+        <p>Please wait while we load your data.</p>
+      </div>
+    );
+  }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+  // Don't render anything if not authenticated (will redirect)
+  if (!user) {
+    return null;
+  }
+  // ✅ Load clients safely (normalizes date fields so .seconds is always safe)
+const fetchClients = async () => {
+  console.log("Starting fetchClients function...");
+  const toSeconds = (val) => {
+    if (!val) return { seconds: Math.floor(Date.now() / 1000) };
+    if (typeof val.seconds === "number") return { seconds: val.seconds };
+    const d = val.toDate ? val.toDate() : new Date(val);
+    return { seconds: Math.floor(d.getTime() / 1000) };
+  };
 
-  // ⬅️ stop here. Keep ALL your existing handlers/effects/UI below this line.
-  // Make sure your actual JSX `return (...)` stays at the END of this function.
+  try {
+    console.log("Attempting to fetch clients from Firestore...");
+    const clientsRef = collection(db, "clients");
+    console.log("Collection reference created");
+    
+    const snap = await getDocs(clientsRef);
+    console.log(`Fetched ${snap.docs.length} clients from Firestore`);
+    
+    const list = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        quarterStart: toSeconds(data.quarterStart),
+        quarterEnd: toSeconds(data.quarterEnd),
+        submissionDeadline: toSeconds(data.submissionDeadline),
+      };
+    });
 
-  // ✅ Check if logged in user is admin
+    console.log("Clients processed successfully");
+    setClients(list);
+    setError("");
+  } catch (e) {
+    console.error("Failed to load clients:", e);
+    console.error("Error details:", JSON.stringify(e, Object.getOwnPropertyNames(e)));
+    setError(`❌ Failed to load clients: ${e.message}`);
+    setClients([]);
+  }
+};
+
+
+  // ✅ Check if logged in user is admin (consolidated)
   useEffect(() => {
     const checkAdmin = async () => {
       if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists() && userSnap.data().role === "admin") {
-          setIsAdmin(true);
+        try {
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists() && userSnap.data().role === "admin") {
+            console.log("User is admin:", user.email);
+            setIsAdmin(true);
+          } else {
+            console.log("User is not admin:", user.email);
+            setIsAdmin(false);
+            if (userSnap.exists()) {
+              console.log("User role:", userSnap.data().role);
+            } else {
+              console.log("User document does not exist");
+            }
+          }
+        } catch (error) {
+          console.error("Error checking admin status:", error);
+          setIsAdmin(false);
         }
+      } else {
+        setIsAdmin(false);
       }
     };
     checkAdmin();
   }, [user]);
 
-  // ✅ Redirect if not logged in
-  useEffect(() => {
-    if (!user) {
-      navigate("/");
-    } else {
-      fetchClients();
-    }
-  }, [user]);
+useEffect(() => {
+  console.log("Dashboard useEffect - Auth state:", { loading, user: user?.email });
+  
+  if (loading) {
+    console.log("Still loading auth state...");
+    return;
+  }
+  
+  if (!user) {
+    console.log("No user logged in, should redirect");
+    return;
+  }
+  
+  console.log("User authenticated, fetching clients...");
+  fetchClients();
+}, [user, loading]);
 
   // ✅ Navigate to add user
   const handleAddUserClick = () => {
@@ -217,6 +264,10 @@ useEffect(() => {
     navigate("/");
   };
 
+  const handleBackToSelector = () => {
+    navigate("/app-selector");
+  };
+
   // ✅ Determine color for submission deadline
   const isCurrentMonth = (date) => {
     const today = new Date();
@@ -237,29 +288,62 @@ useEffect(() => {
     return deadlineA - deadlineB; // Sorts by earliest deadline first
   });
 
-  useEffect(() => {
-    const checkAdmin = async () => {
-      const user = auth.currentUser;
-      if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists() && userSnap.data().role === "admin") {
-          setIsAdmin(true);
-        }
-      }
-    };
-    checkAdmin();
-  }, []);
+
   
   return (
-    <div style={{ backgroundColor: "#EEF4E6", minHeight: "100vh", padding: "20px" }}>
-      <h2 style={{ color: "#228B22", textAlign: "center" }}>ACCESS ACCOUNTING LLC</h2>
+    <div style={{ backgroundColor: "#EEF4E6", minHeight: "100vh", padding: "20px", position: "relative" }}>
+      {/* Logo in top-right corner */}
+      <div style={{
+        position: 'absolute',
+        top: '20px',
+        right: '20px',
+        zIndex: 1000
+      }}>
+        <img 
+          src={AccessAccountingLogo} 
+          alt="Access Accounting Logo" 
+          style={{
+            width: '200px',
+            height: 'auto',
+            filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.1))',
+            transition: 'transform 0.3s ease',
+            display: 'block'
+          }}
+          onMouseOver={(e) => e.target.style.transform = 'scale(1.05)'}
+          onMouseOut={(e) => e.target.style.transform = 'scale(1)'}
+          onError={(e) => {
+            console.error('Logo failed to load:', e);
+            e.target.style.display = 'none';
+          }}
+          onLoad={() => console.log('Logo loaded successfully')}
+        />
+      </div>
+      <h2 style={{ color: "#228B22", textAlign: "center", marginBottom: "20px" }}>ACCESS ACCOUNTING LLC</h2>
 
-      {isAdmin && (
-  <button onClick={() => navigate("/add-user")} style={{ marginBottom: "1rem", padding: "0.5rem" }}>
-    ➕ Add New User
-  </button>
-)}
+      {/* Admin Controls Section */}
+      <div style={{ marginBottom: "20px", padding: "10px", backgroundColor: "#f0f8ff", borderRadius: "5px" }}>
+        <h3>Admin Controls</h3>
+        <p>Current user: {user?.email} | Admin status: {isAdmin ? "✅ Admin" : "❌ Not Admin"}</p>
+        {isAdmin ? (
+          <button 
+            onClick={() => navigate("/add-user")} 
+            style={{ 
+              marginBottom: "1rem", 
+              padding: "0.5rem 1rem", 
+              backgroundColor: "#4CAF50", 
+              color: "white", 
+              fontWeight: "bold", 
+              border: "none", 
+              borderRadius: "4px", 
+              cursor: "pointer" 
+            }}
+          >
+            ➕ Add New User
+          </button>
+        ) : (
+          <p style={{ color: "#FF8C00" }}>You need admin privileges to add new users.</p>
+        )}
+      </div>
 
       {/* ✅ Summary Section */}
       <div style={{ display: "flex", justifyContent: "space-around", marginBottom: "20px" }}>
@@ -349,10 +433,32 @@ useEffect(() => {
         </tbody>
       </table>
 
-      <button onClick={handleLogout}>Logout</button>
+      <div style={{ marginBottom: "20px", textAlign: "center" }}>
+        <button 
+          onClick={handleBackToSelector}
+          style={{ backgroundColor: "#666", color: "white", padding: "10px 20px", border: "none", borderRadius: "5px", cursor: "pointer", marginRight: "10px" }}
+        >
+          ← Back to App Selector
+        </button>
+        {isAdmin && (
+          <button 
+            onClick={() => navigate("/add-user")}
+            style={{ backgroundColor: "#228B22", color: "white", padding: "10px 20px", border: "none", borderRadius: "5px", cursor: "pointer", marginRight: "10px" }}
+          >
+            Manage Users
+          </button>
+        )}
+        <button 
+          onClick={handleLogout}
+          style={{ backgroundColor: "#DC143C", color: "white", padding: "10px 20px", border: "none", borderRadius: "5px", cursor: "pointer" }}
+        >
+          Logout
+        </button>
+      </div>
     </div>
   );
 };
 
-export default Dashboard;
+export default VatDashboard;
+
 

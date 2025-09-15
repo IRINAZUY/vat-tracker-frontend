@@ -1,0 +1,1468 @@
+import { getApp } from "firebase/app";
+import { setLogLevel } from "firebase/firestore";
+
+console.log("🔥 FIREBASE projectId:", getApp().options.projectId);
+setLogLevel("debug"); // temporary: shows commit/stream logs in the console
+
+import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuthState } from "react-firebase-hooks/auth";
+import { auth, db } from "./dynamic-firebase-config";
+import { signOut } from "firebase/auth";
+import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc, getDoc, setDoc, onSnapshot, query, where } from "firebase/firestore";
+import UnifiedHeader from "./components/UnifiedHeader";
+import BottomRightLogo from "./components/BottomRightLogo";
+
+// Constants
+const DAY_BUCKETS = [10, 15, 20, 25, 30];
+const BOOKKEEPERS = ["Nina", "Maria", "Arlyn", "Olya"];
+
+// Date utilities
+const addMonths = (date, months) => {
+  const result = new Date(date);
+  result.setMonth(result.getMonth() + months);
+  return result;
+};
+
+const getDueDate = (reportingMonth, closingDay) => {
+  const nextMonth = addMonths(reportingMonth, 1);
+  return new Date(nextMonth.getFullYear(), nextMonth.getMonth(), closingDay);
+};
+
+const isOverdue = (dueDate) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return dueDate < today;
+};
+const isDueSoon = (dueDate) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const threeDaysFromNow = new Date(today);
+  threeDaysFromNow.setDate(today.getDate() + 3);
+  return dueDate >= today && dueDate <= threeDaysFromNow;
+};
+
+// Firestore operations
+const loadClosingClients = async () => {
+  try {
+    console.log('Loading closing clients from Firestore...');
+    const clientsRef = collection(db, "closingClients");
+    const snap = await getDocs(clientsRef);
+    const clients = [];
+    snap.docs.forEach(doc => {
+      console.log('Client document:', doc.id, doc.data());
+      clients.push({ id: doc.id, ...doc.data() });
+    });
+    console.log('Loaded closing clients:', clients);
+    return clients;
+  } catch (error) {
+    console.error('Failed to load closing clients:', error);
+    return [];
+  }
+};
+
+const saveClosingClient = async (client) => {
+  try {
+    console.log('Saving closing client:', client);
+    if (client.id) {
+      // Update existing client
+      const clientRef = doc(db, "closingClients", client.id);
+      await updateDoc(clientRef, {
+        name: client.name,
+        closingDay: client.closingDay,
+        bookkeeper: client.bookkeeper,
+        notes: client.notes || "",
+        updatedAt: new Date()
+      });
+    } else {
+      // Add new client
+      const clientsRef = collection(db, "closingClients");
+      await addDoc(clientsRef, {
+        name: client.name,
+        closingDay: client.closingDay,
+        bookkeeper: client.bookkeeper,
+        notes: client.notes || "",
+        createdAt: new Date(),
+        createdBy: auth.currentUser?.uid
+      });
+    }
+    console.log('Client saved successfully');
+  } catch (error) {
+    console.error('Failed to save closing client:', error);
+    throw error;
+  }
+};
+
+const deleteClosingClient = async (clientId) => {
+  try {
+    console.log('Deleting closing client:', clientId);
+    const clientRef = doc(db, "closingClients", clientId);
+    await deleteDoc(clientRef);
+    console.log('Client deleted successfully');
+  } catch (error) {
+    console.error('Failed to delete closing client:', error);
+    throw error;
+  }
+};
+
+const loadClosingStatus = async () => {
+  try {
+    console.log('Loading closing status from Firestore...');
+    const statusRef = collection(db, "closingStatus");
+    const snap = await getDocs(statusRef);
+    const statusMap = {};
+    snap.docs.forEach(doc => {
+      statusMap[doc.id] = doc.data();
+    });
+    console.log('Loaded closing status:', statusMap);
+    return statusMap;
+  } catch (error) {
+    console.error('Failed to load closing status:', error);
+    return {};
+  }
+};
+
+const saveClosingStatus = async (clientId, monthKey, status) => {
+  try {
+    console.log('Saving closing status:', { clientId, monthKey, status });
+    const statusRef = doc(db, "closingStatus", clientId);
+    const statusDoc = await getDoc(statusRef);
+    
+    if (statusDoc.exists()) {
+      // Update existing status
+      const currentData = statusDoc.data();
+      await updateDoc(statusRef, {
+        ...currentData,
+        [monthKey]: status,
+        updatedAt: new Date()
+      });
+    } else {
+      // Create new status document
+      await setDoc(statusRef, {
+        [monthKey]: status,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
+    console.log('Status saved successfully');
+  } catch (error) {
+    console.error('Failed to save closing status:', error);
+    throw error;
+  }
+};
+
+// Migration function
+const migrateLocalStorageToFirestore = async () => {
+  try {
+    console.log('Starting migration from localStorage to Firestore...');
+    
+    // Get data from localStorage
+    const clientsData = localStorage.getItem('closingClients');
+    const statusData = localStorage.getItem('closingStatus');
+    
+    if (!clientsData && !statusData) {
+      return { success: false, message: '❌ No data found in localStorage to migrate.' };
+    }
+    
+    let migratedClients = 0;
+    let migratedStatuses = 0;
+    
+    // Migrate clients
+    if (clientsData) {
+      const clients = JSON.parse(clientsData);
+      for (const client of clients) {
+        try {
+          // Check if client already exists in Firestore
+          const existingClients = await loadClosingClients();
+          const exists = existingClients.some(c => c.name === client.name && c.closingDay === client.closingDay);
+          
+          if (!exists) {
+            await saveClosingClient({
+              name: client.name,
+              closingDay: client.closingDay,
+              bookkeeper: client.bookkeeper,
+              notes: client.notes || ""
+            });
+            migratedClients++;
+          }
+        } catch (error) {
+          console.error('Failed to migrate client:', client, error);
+        }
+      }
+    }
+    
+    // Migrate status
+    if (statusData) {
+      const statusMap = JSON.parse(statusData);
+      for (const [clientId, statuses] of Object.entries(statusMap)) {
+        try {
+          for (const [monthKey, status] of Object.entries(statuses)) {
+            await saveClosingStatus(clientId, monthKey, status);
+          }
+          migratedStatuses++;
+        } catch (error) {
+          console.error('Failed to migrate status for client:', clientId, error);
+        }
+      }
+    }
+    
+    return { 
+      success: true, 
+      message: `✅ Migration completed! Migrated ${migratedClients} clients and ${migratedStatuses} status records.` 
+    };
+  } catch (error) {
+    console.error('Migration failed:', error);
+    return { success: false, message: '❌ Migration failed. Please try again.' };
+  }
+};
+
+// Styles
+const btnPrimary = {
+  padding: "8px 16px",
+  borderRadius: 6,
+  border: "1px solid #2e7d32",
+  background: "#15803d",
+  color: "#fff",
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 500,
+};
+
+const btnSecondary = {
+  padding: "8px 16px",
+  borderRadius: 6,
+  border: "1px solid #e5e7eb",
+  background: "#fff",
+  color: "#374151",
+  cursor: "pointer",
+  fontSize: 14,
+};
+
+const input = {
+  padding: "8px 12px",
+  borderRadius: 6,
+  border: "1px solid #e5e7eb",
+  fontSize: 14,
+};
+
+// Components
+const Pill = ({ children, color = "gray" }) => {
+  const colors = {
+    green: { background: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
+    orange: { background: "#fed7aa", color: "#ea580c", border: "#fdba74" },
+    red: { background: "#fecaca", color: "#dc2626", border: "#fca5a5" },
+    blue: { background: "#dbeafe", color: "#2563eb", border: "#93c5fd" },
+    purple: { background: "#e9d5ff", color: "#7c3aed", border: "#c4b5fd" },
+    gray: { background: "#f3f4f6", color: "#374151", border: "#d1d5db" },
+  };
+  
+  const style = colors[color] || colors.gray;
+  
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 12,
+        fontSize: 12,
+        fontWeight: 500,
+        border: `1px solid ${style.border}`,
+        background: style.background,
+        color: style.color,
+      }}
+    >
+      {children}
+    </span>
+  );
+};
+
+const Card = ({ children, style = {} }) => (
+  <div
+    style={{
+      background: "#fff",
+      borderRadius: 8,
+      border: "1px solid #e5e7eb",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+      ...style,
+    }}
+  >
+    {children}
+  </div>
+);
+
+const Column = ({ title, children }) => (
+  <div
+    style={{
+      minWidth: 280,
+      background: "#f8fafc",
+      borderRadius: 8,
+      border: "1px solid #e2e8f0",
+      padding: 16,
+    }}
+  >
+    <h3
+      style={{
+        margin: "0 0 16px 0",
+        fontSize: 16,
+        fontWeight: 600,
+        color: "#1f2937",
+        textAlign: "center",
+      }}
+    >
+      {title}
+    </h3>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {children}
+    </div>
+  </div>
+);
+
+const pct = (a, b) => (b === 0 ? 0 : Math.round((a / b) * 100));
+
+const ClientCard = ({ client, status, dueDate, onToggleStatus, onEdit, onDelete, onFilterBookkeeper, isAdmin }) => {
+  const isVerified = status === "VERIFIED_CLOSED";
+  const overdue = isOverdue(dueDate);
+  const dueSoon = isDueSoon(dueDate);
+  
+  const getStatusColor = () => {
+    if (isVerified) return "green";
+    if (overdue) return "red";
+    if (dueSoon) return "orange";
+    return "gray";
+  };
+
+  const getStatusText = () => {
+    if (isVerified) return "Verified & Closed";
+    if (overdue) return "Overdue";
+    if (dueSoon) return "Due Soon";
+    return "Pending";
+  };
+
+  return (
+    <Card style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <h4 style={{ margin: "0 0 4px 0", fontSize: 16, fontWeight: 600, color: "#1f2937" }}>
+            {client.name}
+          </h4>
+          <div style={{ fontSize: 14, color: "#6b7280", marginBottom: 8 }}>
+            Due: {dueDate.toLocaleDateString()}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <Pill color="blue">Day {client.closingDay}</Pill>
+            <Pill 
+              color="purple"
+              style={{ cursor: "pointer" }}
+              onClick={() => onFilterBookkeeper(client.bookkeeper)}
+            >
+              {client.bookkeeper}
+            </Pill>
+          </div>
+          <Pill color={getStatusColor()}>
+            {getStatusText()}
+          </Pill>
+        </div>
+      </div>
+      
+      {client.notes && (
+        <div style={{ 
+          fontSize: 13, 
+          color: "#6b7280", 
+          fontStyle: "italic", 
+          marginBottom: 12,
+          padding: "8px",
+          background: "#f9fafb",
+          borderRadius: 4,
+          border: "1px solid #f3f4f6"
+        }}>
+          {client.notes}
+        </div>
+      )}
+      
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button
+          onClick={() => onToggleStatus(client)}
+          style={{
+            ...btnSecondary,
+            background: isVerified ? "#dcfce7" : "#fff",
+            color: isVerified ? "#15803d" : "#374151",
+            border: `1px solid ${isVerified ? "#bbf7d0" : "#e5e7eb"}`,
+            fontSize: 12,
+            padding: "6px 12px",
+          }}
+        >
+          {isVerified ? "✓ Verified" : "Mark Complete"}
+        </button>
+        
+        {isAdmin && (
+          <>
+            <button
+              onClick={() => onEdit(client)}
+              style={{
+                ...btnSecondary,
+                fontSize: 12,
+                padding: "6px 12px",
+              }}
+            >
+              ✏️ Edit
+            </button>
+            <button
+              onClick={() => onDelete(client)}
+              style={{
+                ...btnSecondary,
+                color: "#dc2626",
+                border: "1px solid #fca5a5",
+                fontSize: 12,
+                padding: "6px 12px",
+              }}
+            >
+              🗑️ Delete
+            </button>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// Modal Component
+const Modal = ({ open, onClose, initial, onSave }) => {
+  const [name, setName] = useState("");
+  const [closingDay, setClosingDay] = useState("");
+  const [bookkeeper, setBookkeeper] = useState("");
+  const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    if (initial) {
+      setName(initial.name || "");
+      setClosingDay(initial.closingDay || "");
+      setBookkeeper(initial.bookkeeper || "");
+      setNotes(initial.notes || "");
+    } else {
+      setName("");
+      setClosingDay("");
+      setBookkeeper("");
+      setNotes("");
+    }
+  }, [initial, open]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name.trim() || !closingDay || !bookkeeper) {
+      alert("Please fill in all required fields");
+      return;
+    }
+    onSave({ name: name.trim(), closingDay: Number(closingDay), bookkeeper, notes: notes.trim() });
+  };
+
+  if (!open) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 8,
+          padding: 24,
+          width: "90%",
+          maxWidth: 500,
+          boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ margin: "0 0 20px 0", fontSize: 20, fontWeight: 600, color: "#1f2937" }}>
+          {initial ? "Edit Client" : "Add New Client"}
+        </h2>
+        
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Client Name *
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={{ ...input, width: "100%", boxSizing: "border-box" }}
+              placeholder="Enter client name"
+              required
+            />
+          </div>
+          
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Closing Day *
+            </label>
+            <select
+              value={closingDay}
+              onChange={(e) => setClosingDay(e.target.value)}
+              style={{ ...input, width: "100%", boxSizing: "border-box" }}
+              required
+            >
+              <option value="">Select closing day</option>
+              {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                <option key={day} value={day}>{day}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Bookkeeper *
+            </label>
+            <select
+              value={bookkeeper}
+              onChange={(e) => setBookkeeper(e.target.value)}
+              style={{ ...input, width: "100%", boxSizing: "border-box" }}
+              required
+            >
+              <option value="">Select bookkeeper</option>
+              {BOOKKEEPERS.map(keeper => (
+                <option key={keeper} value={keeper}>{keeper}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Notes
+            </label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              style={{ 
+                ...input, 
+                width: "100%", 
+                boxSizing: "border-box",
+                minHeight: 80,
+                resize: "vertical",
+                fontFamily: "inherit"
+              }}
+              placeholder="Optional notes about this client"
+            />
+          </div>
+          
+          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={btnSecondary}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              style={btnPrimary}
+            >
+              {initial ? "Update Client" : "Add Client"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Main Component
+export default function ClosingDashboard() {
+  const navigate = useNavigate();
+  const [user, loading] = useAuthState(auth);
+  const [clients, setClients] = useState([]);
+  const [statusMap, setStatusMap] = useState({});
+  const [monthDate, setMonthDate] = useState(new Date());
+  const [search, setSearch] = useState("");
+  const [keeperFilter, setKeeperFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [viewMode, setViewMode] = useState("day");
+  const [loadingData, setLoadingData] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [userData, setUserData] = useState(null);
+  const [migrating, setMigrating] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState('');
+
+  const mKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
+
+  const fetchClosingClients = async () => {
+    try {
+      console.log('Fetching closing clients from Firestore...');
+      const clientsRef = collection(db, "closingClients");
+      const clientsQuery = query(clientsRef, where('createdBy', '==', user.uid));
+      const snap = await getDocs(clientsQuery);
+      const clientsData = [];
+      snap.docs.forEach(doc => {
+        console.log('Client document:', doc.id, doc.data());
+        clientsData.push({ id: doc.id, ...doc.data() });
+      });
+      console.log('Fetched closing clients:', clientsData);
+      setClients(clientsData);
+      return clientsData;
+    } catch (error) {
+      console.error('Failed to fetch closing clients:', error);
+      return [];
+    }
+  };
+
+  const fetchClosingStatus = async () => {
+    try {
+      console.log('Fetching closing status from Firestore...');
+      const statusRef = collection(db, "closingStatus");
+      const snap = await getDocs(statusRef);
+      const statusMap = {};
+      snap.docs.forEach(doc => {
+        statusMap[doc.id] = doc.data();
+      });
+      console.log('Fetched closing status:', statusMap);
+      setStatusMap(statusMap);
+      return statusMap;
+    } catch (error) {
+      console.error('Failed to fetch closing status:', error);
+      return {};
+    }
+  };
+
+  // Load data from Firestore and set up real-time listeners
+  useEffect(() => {
+    if (!user) return;
+
+    setLoadingData(true);
+    
+    // Initial data fetch
+    const loadInitialData = async () => {
+      await Promise.all([fetchClosingClients(), fetchClosingStatus()]);
+      setLoadingData(false);
+    };
+    loadInitialData();
+    
+    // Set up real-time listener for clients (filtered by current user)
+    const clientsCollection = collection(db, 'closingClients');
+    const clientsQuery = query(clientsCollection, where('createdBy', '==', user.uid));
+    console.log('Setting up real-time listener for closingClients (user-filtered)...');
+    const unsubscribeClients = onSnapshot(clientsQuery, (snapshot) => {
+      console.log('Received snapshot update for closingClients, size:', snapshot.size);
+      const clientsData = [];
+      snapshot.forEach((doc) => {
+        console.log('Client document:', doc.id, doc.data());
+        clientsData.push({ id: doc.id, ...doc.data() });
+      });
+      console.log('Setting clients data:', clientsData);
+      setClients(clientsData);
+    }, (error) => {
+      console.error('Error listening to clients:', error);
+      console.error('Error details:', error.code, error.message);
+    });
+
+    // Set up real-time listener for status
+    const statusCollection = collection(db, 'closingStatus');
+    const unsubscribeStatus = onSnapshot(statusCollection, (snapshot) => {
+      const statusData = {};
+      snapshot.forEach((doc) => {
+        statusData[doc.id] = doc.data();
+      });
+      setStatusMap(statusData);
+    }, (error) => {
+      console.error('Error listening to status:', error);
+    });
+
+    // Cleanup listeners on unmount
+    return () => {
+      unsubscribeClients();
+      unsubscribeStatus();
+    };
+  }, [user]);
+
+  // Check user role from Firestore
+  useEffect(() => {
+    const checkUserRole = async () => {
+      if (user) {
+        try {
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const data = userSnap.data();
+            setUserData(data);
+            if (data.role === "admin") {
+              console.log("User is admin:", user.email);
+              setIsAdmin(true);
+            } else {
+              console.log("User is not admin:", user.email);
+              setIsAdmin(false);
+              console.log("User role:", data.role);
+            }
+          } else {
+            console.log("User document does not exist");
+            setIsAdmin(false);
+            setUserData(null);
+          }
+        } catch (error) {
+          console.error("Error fetching user role:", error);
+          setIsAdmin(false);
+          setUserData(null);
+        }
+      }
+    };
+
+    checkUserRole();
+  }, [user]);
+
+  // Add automatic redirect for unauthenticated users
+  useEffect(() => {
+    if (!loading && !user) {
+      navigate("/", { replace: true });
+    }
+  }, [user, loading, navigate]);
+
+  const filtered = useMemo(() => {
+    return clients
+      .filter((c) =>
+        search.trim() ? c.name.toLowerCase().includes(search.toLowerCase()) : true
+      )
+      .filter((c) => (keeperFilter === "All" ? true : c.bookkeeper === keeperFilter))
+      .filter((c) => {
+        if (statusFilter === "All") return true;
+        const st = statusMap[c.id]?.[mKey] || "PENDING";
+        return statusFilter === "Verified" ? st === "VERIFIED_CLOSED" : st === "PENDING";
+      });
+  }, [clients, search, keeperFilter, statusFilter, statusMap, mKey]);
+
+  const counts = useMemo(() => {
+    // Count only created clients (all clients in the system)
+    let total = clients.length; // Use all clients, not filtered
+    let verified = 0;
+    let pending = 0;
+    
+    for (const c of clients) {
+      const st = statusMap[c.id]?.[mKey] || "PENDING";
+      if (st === "VERIFIED_CLOSED") {
+        verified++;
+      } else {
+        pending++;
+      }
+    }
+    
+    return { total, verified, pending, pct: pct(verified, total) };
+  }, [clients, statusMap, mKey]); // Use clients instead of filtered
+
+  // Show loading state while checking authentication
+  if (loading) {
+    return (
+      <div style={{ backgroundColor: "#E8F5E8", minHeight: "100vh", padding: "20px", textAlign: "center" }}>
+        <h2 style={{ color: "#15803d" }}>Loading Closing Dashboard...</h2>
+        <p>Please wait while we load your data.</p>
+      </div>
+    );
+  }
+
+  // Don't render anything if not authenticated (will redirect)
+  if (!user) {
+    return null;
+  }
+
+  const setStatus = async (clientId, value) => {
+    try {
+      await saveClosingStatus(clientId, mKey, value);
+      setStatusMap((prev) => {
+        const cur = { ...(prev[clientId] || {}) };
+        cur[mKey] = value;
+        return { ...prev, [clientId]: cur };
+      });
+      
+      // Explicit data refresh like other dashboards
+      fetchClosingStatus();
+    } catch (error) {
+      console.error('Failed to update status:', error);
+      alert('Failed to update status. Please try again.');
+    }
+  };
+
+  const toggleVerify = (client) => {
+    const st = statusMap[client.id]?.[mKey] || "PENDING";
+    setStatus(client.id, st === "VERIFIED_CLOSED" ? "PENDING" : "VERIFIED_CLOSED");
+  };
+
+  const onSaveClient = async ({ name, closingDay, bookkeeper, notes }) => {
+    try {
+      if (editing) {
+        const updatedClient = { ...editing, name, closingDay, bookkeeper, notes };
+        await saveClosingClient(updatedClient);
+      } else {
+        const newClient = { 
+          name, 
+          closingDay, 
+          bookkeeper, 
+          notes 
+        };
+        await saveClosingClient(newClient);
+      }
+      setModalOpen(false);
+      setEditing(null);
+      alert(editing ? "✅ Client updated!" : "✅ Client added!");
+      
+      // Explicit data refresh like other dashboards
+      fetchClosingClients();
+    } catch (error) {
+      console.error('Failed to save client:', error);
+      alert('Failed to save client. Please try again.');
+    }
+  };
+
+  const onDeleteClient = async (client) => {
+    if (!window.confirm(`Delete "${client.name}"?`)) return;
+    try {
+      await deleteClosingClient(client.id);
+      alert('✅ Client deleted!');
+      
+      // Explicit data refresh like other dashboards
+      fetchClosingClients();
+    } catch (error) {
+      console.error('Failed to delete client:', error);
+      alert('Failed to delete client. Please try again.');
+    }
+  };
+
+  const onEditClient = (client) => {
+    setEditing(client);
+    setModalOpen(true);
+  };
+
+  const onFilterBookkeeper = (bookkeeper) => {
+    setKeeperFilter(bookkeeper);
+  };
+
+  const handleLogout = () => {
+    if (window.confirm("Are you sure you want to logout?")) {
+      // Add logout logic here
+      navigate("/login");
+    }
+  };
+
+  const handleBackToSelector = () => {
+    navigate("/");
+  };
+
+  const handleMigration = async () => {
+    if (!window.confirm('This will migrate your localStorage data to Firestore. Continue?')) return;
+    
+    setMigrating(true);
+    setMigrationMessage('');
+    
+    const result = await migrateLocalStorageToFirestore();
+    
+    setMigrationMessage(result.message);
+    setMigrating(false);
+    
+    if (result.success) {
+      setTimeout(() => setMigrationMessage(''), 5000);
+    }
+  };
+
+  return (
+    <div style={{ background: "#E8F5E8", minHeight: "100vh", position: "relative" }}>
+      {/* Unified Header */}
+      <UnifiedHeader 
+        title="Monthly Closing Schedule" 
+        userEmail={`${user?.email} | Role: ${userData?.role || 'Loading...'} | Admin: ${isAdmin ? 'Yes' : 'No'}`} 
+      />
+      <BottomRightLogo />
+
+      {/* Controls Row */}
+      <div
+        style={{
+          background: "#f8fafc",
+          borderBottom: "1px solid #e2e8f0",
+          padding: "16px 24px",
+        }}
+      >
+        <div
+          style={{
+            margin: "0 24px",
+          }}
+        >
+          {/* First Line: View Toggle, Search and Filters, Add Client - Centered and Close Together */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            {/* View Toggle */}
+            <div style={{ display: "flex", background: "#e2e8f0", borderRadius: 8, padding: 3 }}>
+              <button
+                onClick={() => setViewMode("day")}
+                style={{
+                  padding: "6px 12px",
+                  border: "none",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  background: viewMode === "day" ? "#15803d" : "transparent",
+                  color: viewMode === "day" ? "#fff" : "#475569",
+                  fontWeight: viewMode === "day" ? 500 : 400,
+                }}
+              >
+                By Day
+              </button>
+              <button
+                onClick={() => setViewMode("bookkeeper")}
+                style={{
+                  padding: "6px 12px",
+                  border: "none",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  background: viewMode === "bookkeeper" ? "#15803d" : "transparent",
+                  color: viewMode === "bookkeeper" ? "#fff" : "#475569",
+                  fontWeight: viewMode === "bookkeeper" ? 500 : 400,
+                }}
+              >
+                By Bookkeeper
+              </button>
+              <button
+                onClick={() => setViewMode("table")}
+                style={{
+                  padding: "6px 12px",
+                  border: "none",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  background: viewMode === "table" ? "#15803d" : "transparent",
+                  color: viewMode === "table" ? "#fff" : "#475569",
+                  fontWeight: viewMode === "table" ? 500 : 400,
+                }}
+              >
+                Table View
+              </button>
+            </div>
+
+            {/* Search and Filters */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                placeholder="Search client..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ ...input, width: 200 }}
+              />
+              
+              <select
+                value={keeperFilter}
+                onChange={(e) => setKeeperFilter(e.target.value)}
+                style={input}
+              >
+                <option>All</option>
+                {BOOKKEEPERS.map((b) => (
+                  <option key={b}>{b}</option>
+                ))}
+              </select>
+              
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={input}
+              >
+                <option value="All">All</option>
+                <option value="Pending">Pending</option>
+                <option value="Verified">Verified & Closed</option>
+              </select>
+            </div>
+
+            {/* Add Client Button */}
+            <button onClick={() => setModalOpen(true)} style={btnPrimary}>
+              ➕ Add New Client
+            </button>
+            
+            {/* Migration Button */}
+            <button 
+              onClick={handleMigration} 
+              disabled={migrating}
+              style={{
+                ...btnSecondary,
+                opacity: migrating ? 0.6 : 1,
+                cursor: migrating ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {migrating ? '🔄 Migrating...' : '📦 Migrate Data'}
+            </button>
+          </div>
+          
+          {/* Migration Message */}
+          {migrationMessage && (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '8px 16px',
+                marginBottom: '8px',
+                borderRadius: '6px',
+                background: migrationMessage.includes('failed') ? '#fee2e2' : '#dcfce7',
+                color: migrationMessage.includes('failed') ? '#dc2626' : '#16a34a',
+                fontSize: '14px'
+              }}
+            >
+              {migrationMessage}
+            </div>
+          )}
+
+          {/* Second Line: Month Navigation Centered */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 16,
+              marginBottom: 16,
+            }}
+          >
+            <button
+              onClick={() => setMonthDate(addMonths(monthDate, -1))}
+              style={{
+                padding: "8px 16px",
+                background: "#666",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+                fontSize: 14,
+              }}
+            >
+              ⟵ Previous
+            </button>
+            <div
+              style={{
+                padding: "12px 24px",
+                background: "#f3f4f6",
+                borderRadius: 6,
+                fontSize: 20,
+                fontWeight: 700,
+                color: "#FF6347",
+                minWidth: 200,
+                textAlign: "center",
+              }}
+            >
+              {monthDate.toLocaleDateString(undefined, {
+                month: "long",
+                year: "numeric",
+              })}
+            </div>
+            <button
+              onClick={() => setMonthDate(addMonths(monthDate, 1))}
+              style={{
+                padding: "8px 16px",
+                background: "#666",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+                fontSize: 14,
+              }}
+            >
+              Next ⟶
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Monthly Summary */}
+      <div style={{ padding: "24px" }}>
+        <div style={{ maxWidth: 800, margin: "0 auto 16px auto" }}>
+          <Card style={{ padding: "8px 16px" }}>
+            <h3 style={{ margin: "0 0 8px 0", fontSize: 14, fontWeight: 600, color: "#ef4444", textAlign: "center" }}>Monthly Summary</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ textAlign: "center", flex: 1 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#15803d", lineHeight: 1 }}>
+                  {counts.verified}
+                </div>
+                <div style={{ fontSize: 10, color: "#15803d", fontWeight: 500, marginTop: 1 }}>Verified & Closed</div>
+              </div>
+              
+              <div style={{ textAlign: "center", flex: 1 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#ea580c", lineHeight: 1 }}>
+                  {counts.pending}
+                </div>
+                <div style={{ fontSize: 10, color: "#ea580c", fontWeight: 500, marginTop: 1 }}>Pending</div>
+              </div>
+              
+              <div style={{ textAlign: "center", flex: 1 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#1f2937", lineHeight: 1 }}>
+                  {counts.total}
+                </div>
+                <div style={{ fontSize: 10, color: "#1f2937", fontWeight: 500, marginTop: 1 }}>Total Clients</div>
+              </div>
+              
+              <div style={{ textAlign: "center", flex: 1 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#7c3aed", lineHeight: 1 }}>
+                  {counts.pct}%
+                </div>
+                <div style={{ fontSize: 10, color: "#7c3aed", fontWeight: 500, marginTop: 1 }}>Completion Rate</div>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Views Container */}
+        <div style={{ margin: "0 24px" }}>
+          {viewMode === "day" ? (
+            <DayView
+              clients={filtered}
+              statusMap={statusMap}
+              monthDate={monthDate}
+              mKey={mKey}
+              onToggleStatus={toggleVerify}
+              onEdit={onEditClient}
+              onDelete={onDeleteClient}
+              onFilterBookkeeper={onFilterBookkeeper}
+              isAdmin={isAdmin}
+            />
+          ) : viewMode === "bookkeeper" ? (
+            <BookkeeperView
+              clients={filtered}
+              statusMap={statusMap}
+              monthDate={monthDate}
+              mKey={mKey}
+              onToggleStatus={toggleVerify}
+              onEdit={onEditClient}
+              onDelete={onDeleteClient}
+              onFilterBookkeeper={onFilterBookkeeper}
+              isAdmin={isAdmin}
+            />
+          ) : (
+            <TableView
+              clients={filtered}
+              statusMap={statusMap}
+              monthDate={monthDate}
+              mKey={mKey}
+              onToggleStatus={toggleVerify}
+              onEdit={onEditClient}
+              onDelete={onDeleteClient}
+              onFilterBookkeeper={onFilterBookkeeper}
+              isAdmin={isAdmin}
+            />
+          )}
+        </div>
+      </div>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => {
+          setModalOpen(false);
+          setEditing(null);
+        }}
+        initial={editing}
+        onSave={onSaveClient}
+      />
+    </div>
+  );
+}
+
+// Day View Component
+const DayView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, onEdit, onDelete, onFilterBookkeeper, isAdmin }) => {
+  const byBucket = useMemo(() => {
+    const map = new Map();
+    const other = [];
+    
+    for (const d of DAY_BUCKETS) map.set(d, []);
+    
+    for (const c of clients) {
+      const bucket = DAY_BUCKETS.includes(Number(c.closingDay)) ? Number(c.closingDay) : null;
+      const arr = bucket ? map.get(bucket) : other;
+      arr.push(c);
+    }
+    
+    // Sort inside each bucket by name
+    for (const [k, arr] of map.entries()) {
+      arr.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    other.sort((a, b) => a.closingDay - b.closingDay || a.name.localeCompare(b.name));
+    
+    return { map, other };
+  }, [clients]);
+
+  return (
+    <div style={{ display: "flex", overflowX: "auto", gap: 16, paddingBottom: 16 }}>
+      {DAY_BUCKETS.map((day, index) => (
+        <React.Fragment key={day}>
+          <Column title={`Day ${day}`}>
+          {byBucket.map.get(day).map((client) => {
+            const status = statusMap[client.id]?.[mKey] || "PENDING";
+            const dueDate = getDueDate(monthDate, client.closingDay);
+            return (
+              <ClientCard
+                key={client.id}
+                client={client}
+                status={status}
+                dueDate={dueDate}
+                onToggleStatus={onToggleStatus}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onFilterBookkeeper={onFilterBookkeeper}
+                isAdmin={isAdmin}
+              />
+            );
+          })}
+          </Column>
+          {index < DAY_BUCKETS.length - 1 && (
+            <div style={{ width: 1, background: "#e5e7eb", margin: "0 8px" }} />
+          )}
+        </React.Fragment>
+      ))}
+      
+      {byBucket.other.length > 0 && (
+        <>
+          <div style={{ width: 1, background: "#e5e7eb", margin: "0 8px" }} />
+          <Column title="Other Days">
+            {byBucket.other.map((client) => {
+              const status = statusMap[client.id]?.[mKey] || "PENDING";
+              const dueDate = getDueDate(monthDate, client.closingDay);
+              return (
+                <ClientCard
+                  key={client.id}
+                  client={client}
+                  status={status}
+                  dueDate={dueDate}
+                  onToggleStatus={onToggleStatus}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onFilterBookkeeper={onFilterBookkeeper}
+                  isAdmin={isAdmin}
+                />
+              );
+            })}
+          </Column>
+        </>
+      )}
+    </div>
+  );
+};
+
+// Bookkeeper View Component
+const BookkeeperView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, onEdit, onDelete, onFilterBookkeeper, isAdmin }) => {
+  const byBookkeeper = useMemo(() => {
+    const map = new Map();
+    
+    for (const keeper of BOOKKEEPERS) map.set(keeper, []);
+    
+    for (const c of clients) {
+      const arr = map.get(c.bookkeeper) || [];
+      arr.push(c);
+      if (!map.has(c.bookkeeper)) map.set(c.bookkeeper, arr);
+    }
+    
+    // Sort inside each bookkeeper group by closing day, then name
+    for (const [k, arr] of map.entries()) {
+      arr.sort((a, b) => a.closingDay - b.closingDay || a.name.localeCompare(b.name));
+    }
+    
+    return map;
+  }, [clients]);
+
+  return (
+    <div style={{ display: "flex", overflowX: "auto", gap: 16, paddingBottom: 16 }}>
+      {BOOKKEEPERS.map((keeper, index) => (
+        <React.Fragment key={keeper}>
+          <Column title={keeper}>
+            {(byBookkeeper.get(keeper) || []).map((client) => {
+              const status = statusMap[client.id]?.[mKey] || "PENDING";
+              const dueDate = getDueDate(monthDate, client.closingDay);
+              return (
+                <ClientCard
+                  key={client.id}
+                  client={client}
+                  status={status}
+                  dueDate={dueDate}
+                  onToggleStatus={onToggleStatus}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onFilterBookkeeper={onFilterBookkeeper}
+                  isAdmin={isAdmin}
+                />
+              );
+            })}
+          </Column>
+          {index < BOOKKEEPERS.length - 1 && (
+            <div style={{ width: 1, background: "#e5e7eb", margin: "0 8px" }} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
+
+// Table View Component
+const TableView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, onEdit, onDelete, onFilterBookkeeper, isAdmin }) => {
+  const sortedClients = useMemo(() => {
+    return [...clients].sort((a, b) => {
+      // Sort by closing day first, then by name
+      if (a.closingDay !== b.closingDay) {
+        return a.closingDay - b.closingDay;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [clients]);
+
+  return (
+    <Card style={{ overflow: "hidden" }}>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Client Name
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Closing Day
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Due Date
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Bookkeeper
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Status
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Notes
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedClients.map((client, index) => {
+              const status = statusMap[client.id]?.[mKey] || "PENDING";
+              const dueDate = getDueDate(monthDate, client.closingDay);
+              const isVerified = status === "VERIFIED_CLOSED";
+              const overdue = isOverdue(dueDate);
+              const dueSoon = isDueSoon(dueDate);
+              
+              const getStatusColor = () => {
+                if (isVerified) return "green";
+                if (overdue) return "red";
+                if (dueSoon) return "orange";
+                return "gray";
+              };
+
+              const getStatusText = () => {
+                if (isVerified) return "Verified & Closed";
+                if (overdue) return "Overdue";
+                if (dueSoon) return "Due Soon";
+                return "Pending";
+              };
+
+              return (
+                <tr 
+                  key={client.id}
+                  style={{ 
+                    borderBottom: "1px solid #f3f4f6",
+                    background: index % 2 === 0 ? "#fff" : "#f9fafb"
+                  }}
+                >
+                  <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 500, color: "#1f2937" }}>
+                    {client.name}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, color: "#6b7280" }}>
+                    {client.closingDay}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, color: "#6b7280" }}>
+                    {dueDate.toLocaleDateString()}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <Pill 
+                      color="purple"
+                      style={{ cursor: "pointer" }}
+                      onClick={() => onFilterBookkeeper(client.bookkeeper)}
+                    >
+                      {client.bookkeeper}
+                    </Pill>
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <Pill color={getStatusColor()}>
+                      {getStatusText()}
+                    </Pill>
+                  </td>
+                  <td style={{ padding: "12px 16px", fontSize: 13, color: "#6b7280", maxWidth: 200 }}>
+                    <div style={{ 
+                      overflow: "hidden", 
+                      textOverflow: "ellipsis", 
+                      whiteSpace: "nowrap",
+                      fontStyle: client.notes ? "italic" : "normal"
+                    }}>
+                      {client.notes || "—"}
+                    </div>
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "center", alignItems: "center" }}>
+                      <button
+                        onClick={() => onToggleStatus(client)}
+                        style={{
+                          ...btnSecondary,
+                          background: isVerified ? "#dcfce7" : "#fff",
+                          color: isVerified ? "#15803d" : "#374151",
+                          border: `1px solid ${isVerified ? "#bbf7d0" : "#e5e7eb"}`,
+                          fontSize: 12,
+                          padding: "4px 8px",
+                        }}
+                      >
+                        {isVerified ? "✓" : "○"}
+                      </button>
+                      
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={() => onEdit(client)}
+                            style={{
+                              ...btnSecondary,
+                              fontSize: 12,
+                              padding: "4px 8px",
+                            }}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => onDelete(client)}
+                            style={{
+                              ...btnSecondary,
+                              color: "#dc2626",
+                              border: "1px solid #fca5a5",
+                              fontSize: 12,
+                              padding: "4px 8px",
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      
+      {sortedClients.length === 0 && (
+        <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>
+          <p>No clients found matching your filters.</p>
+        </div>
+      )}
+    </Card>
+  );
+}

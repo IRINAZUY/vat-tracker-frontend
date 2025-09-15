@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Closing Dashboard Save Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        #results { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Closing Dashboard Save Test</h1>
+    
+    <div class="test-section">
+        <h3>Step 1: Authentication Test</h3>
+        <button onclick="testAuth()">Test Authentication</button>
+        <div id="auth-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Step 2: Firestore Write Test</h3>
+        <button onclick="testFirestoreWrite()">Test Firestore Write</button>
+        <div id="firestore-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Step 3: Closing Dashboard Simulation</h3>
+        <button onclick="testClosingDashboardSave()">Simulate Closing Dashboard Save</button>
+        <div id="closing-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Step 4: Data Verification</h3>
+        <button onclick="verifyData()">Verify Saved Data</button>
+        <div id="verify-result"></div>
+    </div>
+    
+    <div id="results"></div>
+    
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+        import { getFirestore, doc, setDoc, getDoc, collection, addDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js';
+        
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyC7Q5Ffw_vUqt6RZ2beYJBYpYDjGyIXuD0",
+            authDomain: "vat-tracker-uae.firebaseapp.com",
+            projectId: "vat-tracker-uae",
+            storageBucket: "vat-tracker-uae.appspot.com",
+            messagingSenderId: "788842579308",
+            appId: "1:788842579308:web:77c20cdef9ffa75364df49"
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        
+        let currentUser = null;
+        
+        // Monitor auth state
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                console.log('✅ User authenticated:', user.uid);
+            } else {
+                console.log('❌ No user authenticated');
+            }
+        });
+        
+        window.testAuth = async function() {
+            const resultDiv = document.getElementById('auth-result');
+            try {
+                resultDiv.innerHTML = '<div class="info">🔄 Testing authentication...</div>';
+                
+                const userCredential = await signInAnonymously(auth);
+                const user = userCredential.user;
+                
+                resultDiv.innerHTML = `<div class="success">✅ Authentication Success!<br>User ID: ${user.uid}</div>`;
+                return user;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Authentication Failed: ${error.message}</div>`;
+                console.error('Auth error:', error);
+                throw error;
+            }
+        };
+        
+        window.testFirestoreWrite = async function() {
+            const resultDiv = document.getElementById('firestore-result');
+            try {
+                if (!currentUser) {
+                    await testAuth();
+                }
+                
+                resultDiv.innerHTML = '<div class="info">🔄 Testing Firestore write...</div>';
+                
+                const testDoc = doc(db, 'test', 'connection-test');
+                await setDoc(testDoc, {
+                    timestamp: new Date(),
+                    test: 'Firestore connection test',
+                    userId: currentUser.uid
+                });
+                
+                resultDiv.innerHTML = '<div class="success">✅ Firestore Write Success!</div>';
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Firestore Write Failed: ${error.message}</div>`;
+                console.error('Firestore error:', error);
+            }
+        };
+        
+        window.testClosingDashboardSave = async function() {
+            const resultDiv = document.getElementById('closing-result');
+            try {
+                if (!currentUser) {
+                    await testAuth();
+                }
+                
+                resultDiv.innerHTML = '<div class="info">🔄 Simulating Closing Dashboard save...</div>';
+                
+                // Simulate the exact operations from ClosingDashboard
+                const testClientData = {
+                    clientName: 'Test Client ' + Date.now(),
+                    status: 'pending',
+                    createdAt: new Date(),
+                    userId: currentUser.uid
+                };
+                
+                // Test closingClients collection
+                const clientDocRef = await addDoc(collection(db, 'closingClients'), testClientData);
+                console.log('✅ Client saved with ID:', clientDocRef.id);
+                
+                // Test closingStatus collection
+                const statusData = {
+                    status: 'active',
+                    lastUpdated: new Date(),
+                    userId: currentUser.uid
+                };
+                
+                const statusDocRef = doc(db, 'closingStatus', 'current');
+                await setDoc(statusDocRef, statusData);
+                console.log('✅ Status saved');
+                
+                resultDiv.innerHTML = `<div class="success">✅ Closing Dashboard Save Success!<br>Client ID: ${clientDocRef.id}</div>`;
+                
+                // Store the client ID for verification
+                window.lastClientId = clientDocRef.id;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Closing Dashboard Save Failed: ${error.message}<br>Details: ${error.code || 'Unknown error'}</div>`;
+                console.error('Closing Dashboard save error:', error);
+            }
+        };
+        
+        window.verifyData = async function() {
+            const resultDiv = document.getElementById('verify-result');
+            try {
+                if (!window.lastClientId) {
+                    resultDiv.innerHTML = '<div class="error">❌ No client ID to verify. Run the save test first.</div>';
+                    return;
+                }
+                
+                resultDiv.innerHTML = '<div class="info">🔄 Verifying saved data...</div>';
+                
+                // Verify client data
+                const clientDoc = await getDoc(doc(db, 'closingClients', window.lastClientId));
+                if (clientDoc.exists()) {
+                    console.log('✅ Client data found:', clientDoc.data());
+                } else {
+                    throw new Error('Client document not found');
+                }
+                
+                // Verify status data using the client ID
+                const statusDoc = await getDoc(doc(db, 'closingStatus', window.lastClientId));
+                if (statusDoc.exists()) {
+                    console.log('✅ Status data found:', statusDoc.data());
+                } else {
+                    throw new Error('Status document not found');
+                }
+                
+                resultDiv.innerHTML = '<div class="success">✅ Data Verification Success!<br>All data is properly saved and retrievable.</div>';
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Data Verification Failed: ${error.message}</div>`;
+                console.error('Verification error:', error);
+            }
+        };
+        
+        // Auto-run authentication on page load
+        window.addEventListener('load', () => {
+            console.log('🚀 Closing Dashboard Save Test loaded');
+        });
+    </script>
+</body>
+</html>

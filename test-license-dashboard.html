@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>License Dashboard Debug Test</title>
+</head>
+<body>
+    <h1>License Dashboard Debug Test</h1>
+    <div id="status">Testing...</div>
+    <div id="results"></div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getFirestore, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyC7Q5Ffw_vUqt6RZ2beYJBYpYDjGyIXuD0",
+            authDomain: "vat-tracker-uae.firebaseapp.com",
+            projectId: "vat-tracker-uae",
+            storageBucket: "vat-tracker-uae.appspot.com",
+            messagingSenderId: "788842579308",
+            appId: "1:788842579308:web:77c20cdef9ffa75364df49"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const statusDiv = document.getElementById('status');
+        const resultsDiv = document.getElementById('results');
+
+        function log(message) {
+            console.log(message);
+            resultsDiv.innerHTML += `<p>${message}</p>`;
+        }
+
+        log('Firebase initialized successfully');
+        log(`Current domain: ${window.location.hostname}`);
+
+        // Test auth state
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                log(`User authenticated: ${user.email}`);
+                testLicenseCollection();
+            } else {
+                log('No user authenticated');
+                statusDiv.textContent = 'Please authenticate first';
+            }
+        });
+
+        async function testLicenseCollection() {
+            try {
+                log('Testing licenses collection access...');
+                const licensesRef = collection(db, 'licenses');
+                log('Licenses collection reference created');
+                
+                const snapshot = await getDocs(licensesRef);
+                log(`Successfully fetched ${snapshot.docs.length} licenses`);
+                
+                snapshot.docs.forEach((doc, index) => {
+                    log(`License ${index + 1}: ${doc.id}`);
+                });
+                
+                statusDiv.textContent = 'Test completed successfully!';
+            } catch (error) {
+                log(`Error accessing licenses collection: ${error.message}`);
+                log(`Error code: ${error.code}`);
+                log(`Full error: ${JSON.stringify(error, Object.getOwnPropertyNames(error))}`);
+                statusDiv.textContent = 'Test failed - check console for details';
+            }
+        }
+
+        // Test basic Firebase connection
+        log('Testing basic Firebase connection...');
+        try {
+            log('Auth object created successfully');
+            log('Firestore object created successfully');
+        } catch (error) {
+            log(`Firebase initialization error: ${error.message}`);
+        }
+    </script>
+</body>
+</html>

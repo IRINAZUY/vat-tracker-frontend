@@ -1,7 +1,7 @@
 import React, { useState } from "react";
-import { getFirestore, collection, addDoc } from "firebase/firestore";
+import { collection, addDoc } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { db } from "./firebase-config";  // ✅ Import Firestore connection
+import { db } from "./dynamic-firebase-config";  // ✅ Import Firestore connection
 
 const AddVAT = () => {
   const [amount, setAmount] = useState("");
@@ -40,7 +40,7 @@ const AddVAT = () => {
   return (
     <div>
       <h2>Add VAT Record</h2>
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      {error && <p style={{ color: "#FF6347" }}>{error}</p>}
       <form onSubmit={handleAddVAT}>
         <input
           type="number"

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Closing Dashboard Firebase Debug</title>
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+        import { getAuth, signInWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js';
+
+        // Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyDGpAI-K8NKZy_4wEcI2R8Xb9X8fJ8fJ8Y",
+            authDomain: "vat-tracker-uae.firebaseapp.com",
+            projectId: "vat-tracker-uae",
+            storageBucket: "vat-tracker-uae.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef123456"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        console.log('Firebase initialized');
+        console.log('Auth:', auth);
+        console.log('Firestore:', db);
+
+        // Test functions
+        window.testLogin = async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                console.log('Attempting login...');
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                console.log('Login successful:', userCredential.user.email);
+                document.getElementById('status').innerHTML = '✅ Login successful: ' + userCredential.user.email;
+                document.getElementById('testSection').style.display = 'block';
+            } catch (error) {
+                console.error('Login failed:', error);
+                document.getElementById('status').innerHTML = '❌ Login failed: ' + error.message;
+            }
+        };
+
+        window.testReadClosingClients = async () => {
+            try {
+                console.log('Testing read access to closingClients...');
+                const clientsRef = collection(db, 'closingClients');
+                const snapshot = await getDocs(clientsRef);
+                console.log('Read successful. Documents found:', snapshot.size);
+                document.getElementById('readResult').innerHTML = `✅ Read successful. Found ${snapshot.size} documents`;
+                
+                snapshot.forEach(doc => {
+                    console.log('Document:', doc.id, doc.data());
+                });
+            } catch (error) {
+                console.error('Read failed:', error);
+                document.getElementById('readResult').innerHTML = '❌ Read failed: ' + error.message;
+            }
+        };
+
+        window.testWriteClosingClient = async () => {
+            try {
+                console.log('Testing write access to closingClients...');
+                const clientsRef = collection(db, 'closingClients');
+                const testClient = {
+                    name: 'Test Client ' + Date.now(),
+                    closingDay: 15,
+                    bookkeeper: 'Test Bookkeeper',
+                    notes: 'Test notes',
+                    createdAt: new Date()
+                };
+                
+                console.log('Adding test client:', testClient);
+                const docRef = await addDoc(clientsRef, testClient);
+                console.log('Write successful. Document ID:', docRef.id);
+                document.getElementById('writeResult').innerHTML = `✅ Write successful. Document ID: ${docRef.id}`;
+            } catch (error) {
+                console.error('Write failed:', error);
+                console.error('Error code:', error.code);
+                console.error('Error message:', error.message);
+                document.getElementById('writeResult').innerHTML = `❌ Write failed: ${error.code} - ${error.message}`;
+            }
+        };
+
+        window.testReadClosingStatus = async () => {
+            try {
+                console.log('Testing read access to closingStatus...');
+                const statusRef = collection(db, 'closingStatus');
+                const snapshot = await getDocs(statusRef);
+                console.log('Read successful. Documents found:', snapshot.size);
+                document.getElementById('statusReadResult').innerHTML = `✅ Read successful. Found ${snapshot.size} documents`;
+            } catch (error) {
+                console.error('Read failed:', error);
+                document.getElementById('statusReadResult').innerHTML = '❌ Read failed: ' + error.message;
+            }
+        };
+
+        window.testWriteClosingStatus = async () => {
+            try {
+                console.log('Testing write access to closingStatus...');
+                const statusRef = collection(db, 'closingStatus');
+                const testStatus = {
+                    clientId: 'test-client-' + Date.now(),
+                    '2025-01': 'PENDING',
+                    updatedAt: new Date()
+                };
+                
+                console.log('Adding test status:', testStatus);
+                const docRef = await addDoc(statusRef, testStatus);
+                console.log('Write successful. Document ID:', docRef.id);
+                document.getElementById('statusWriteResult').innerHTML = `✅ Write successful. Document ID: ${docRef.id}`;
+            } catch (error) {
+                console.error('Write failed:', error);
+                console.error('Error code:', error.code);
+                console.error('Error message:', error.message);
+                document.getElementById('statusWriteResult').innerHTML = `❌ Write failed: ${error.code} - ${error.message}`;
+            }
+        };
+    </script>
+</head>
+<body>
+    <h1>Closing Dashboard Firebase Debug</h1>
+    
+    <div style="margin-bottom: 20px;">
+        <h3>Step 1: Login</h3>
+        <input type="email" id="email" placeholder="Email" style="margin-right: 10px;">
+        <input type="password" id="password" placeholder="Password" style="margin-right: 10px;">
+        <button onclick="testLogin()">Login</button>
+        <div id="status" style="margin-top: 10px; font-weight: bold;"></div>
+    </div>
+
+    <div id="testSection" style="display: none;">
+        <h3>Step 2: Test Firestore Operations</h3>
+        
+        <div style="margin-bottom: 15px;">
+            <h4>Test closingClients Collection:</h4>
+            <button onclick="testReadClosingClients()">Test Read</button>
+            <button onclick="testWriteClosingClient()">Test Write</button>
+            <div id="readResult" style="margin-top: 5px;"></div>
+            <div id="writeResult" style="margin-top: 5px;"></div>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <h4>Test closingStatus Collection:</h4>
+            <button onclick="testReadClosingStatus()">Test Read</button>
+            <button onclick="testWriteClosingStatus()">Test Write</button>
+            <div id="statusReadResult" style="margin-top: 5px;"></div>
+            <div id="statusWriteResult" style="margin-top: 5px;"></div>
+        </div>
+    </div>
+
+    <div style="margin-top: 30px; padding: 15px; background-color: #f0f0f0;">
+        <h4>Instructions:</h4>
+        <ol>
+            <li>Open browser Developer Tools (F12) and check the Console tab</li>
+            <li>Enter your login credentials and click Login</li>
+            <li>If login succeeds, test the read and write operations</li>
+            <li>Check the console for detailed error messages</li>
+            <li>Look for any permission denied errors or other Firebase errors</li>
+        </ol>
+    </div>
+</body>
+</html>

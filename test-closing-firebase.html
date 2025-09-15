@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Closing Dashboard Firebase Connection</title>
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
+        import { getFirestore, collection, addDoc, getDocs } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+        import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
+
+        // Firebase config (same as in your app)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDvzKHE8RLBJDmb8xzKHE8RLBJDmb8xzKHE8",
+            authDomain: "vat-tracker-app.firebaseapp.com",
+            projectId: "vat-tracker-app",
+            storageBucket: "vat-tracker-app.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef123456789012345678"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        console.log('Firebase initialized');
+
+        // Test authentication state
+        onAuthStateChanged(auth, (user) => {
+            console.log('Auth state changed:', user ? user.email : 'No user');
+            document.getElementById('auth-status').textContent = user ? `Logged in as: ${user.email}` : 'Not logged in';
+            
+            if (user) {
+                testFirestoreOperations();
+            }
+        });
+
+        // Test Firestore operations
+        async function testFirestoreOperations() {
+            try {
+                console.log('Testing Firestore read operation...');
+                
+                // Test reading from closingClients collection
+                const clientsRef = collection(db, "closingClients");
+                const snapshot = await getDocs(clientsRef);
+                
+                console.log('Read operation successful. Documents found:', snapshot.size);
+                document.getElementById('read-status').textContent = `✅ Read successful. Found ${snapshot.size} documents`;
+                
+                // List existing documents
+                const docs = [];
+                snapshot.forEach(doc => {
+                    docs.push({ id: doc.id, ...doc.data() });
+                });
+                document.getElementById('existing-docs').textContent = JSON.stringify(docs, null, 2);
+                
+                // Test write operation
+                console.log('Testing Firestore write operation...');
+                const testClient = {
+                    name: 'Test Client ' + Date.now(),
+                    closingDay: 15,
+                    bookkeeper: 'Nina',
+                    notes: 'Test client for Firebase connection'
+                };
+                
+                const docRef = await addDoc(clientsRef, testClient);
+                console.log('Write operation successful. Document ID:', docRef.id);
+                document.getElementById('write-status').textContent = `✅ Write successful. Document ID: ${docRef.id}`;
+                
+            } catch (error) {
+                console.error('Firestore operation failed:', error);
+                document.getElementById('error-status').textContent = `❌ Error: ${error.message}`;
+            }
+        }
+
+        // Make functions available globally for button clicks
+        window.testFirestoreOperations = testFirestoreOperations;
+    </script>
+</head>
+<body>
+    <h1>Closing Dashboard Firebase Connection Test</h1>
+    
+    <div style="margin: 20px 0;">
+        <h3>Authentication Status:</h3>
+        <p id="auth-status">Checking...</p>
+    </div>
+    
+    <div style="margin: 20px 0;">
+        <h3>Firestore Read Test:</h3>
+        <p id="read-status">Not tested yet</p>
+    </div>
+    
+    <div style="margin: 20px 0;">
+        <h3>Firestore Write Test:</h3>
+        <p id="write-status">Not tested yet</p>
+    </div>
+    
+    <div style="margin: 20px 0;">
+        <h3>Error Status:</h3>
+        <p id="error-status">No errors</p>
+    </div>
+    
+    <div style="margin: 20px 0;">
+        <h3>Existing Documents:</h3>
+        <pre id="existing-docs">Loading...</pre>
+    </div>
+    
+    <button onclick="testFirestoreOperations()" style="padding: 10px 20px; font-size: 16px;">Test Firestore Operations</button>
+</body>
+</html>

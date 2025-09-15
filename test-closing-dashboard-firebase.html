@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Closing Dashboard Firebase Connection</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .success { background-color: #d4edda; border-color: #c3e6cb; }
+        .error { background-color: #f8d7da; border-color: #f5c6cb; }
+        .info { background-color: #d1ecf1; border-color: #bee5eb; }
+        button { padding: 10px 15px; margin: 5px; cursor: pointer; }
+        #output { white-space: pre-wrap; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Closing Dashboard Firebase Connection Test</h1>
+    
+    <div class="test-section info">
+        <h3>Test Environment</h3>
+        <p>Domain: <span id="domain"></span></p>
+        <p>User Agent: <span id="userAgent"></span></p>
+        <p>Firebase Project: <span id="firebaseProject"></span></p>
+    </div>
+
+    <div class="test-section">
+        <h3>Authentication Test</h3>
+        <button onclick="testAuth()">Test Authentication</button>
+        <div id="authStatus"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Firestore Connection Test</h3>
+        <button onclick="testFirestoreConnection()">Test Firestore Connection</button>
+        <div id="firestoreStatus"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Closing Clients Test</h3>
+        <button onclick="testLoadClients()">Load Clients</button>
+        <button onclick="testSaveClient()">Save Test Client</button>
+        <button onclick="testDeleteTestClient()">Delete Test Client</button>
+        <div id="clientsStatus"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Closing Status Test</h3>
+        <button onclick="testLoadStatus()">Load Status</button>
+        <button onclick="testSaveStatus()">Save Test Status</button>
+        <div id="statusStatus"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Debug Output</h3>
+        <button onclick="clearOutput()">Clear Output</button>
+        <div id="output"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, deleteDoc, setDoc, connectFirestoreEmulator } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyC7Q5Ffw_vUqt6RZ2beYJBYpYDjGyIXuD0",
+            authDomain: "vat-tracker-uae.firebaseapp.com",
+            projectId: "vat-tracker-uae",
+            storageBucket: "vat-tracker-uae.appspot.com",
+            messagingSenderId: "788842579308",
+            appId: "1:788842579308:web:77c20cdef9ffa75364df49"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let currentUser = null;
+        let testClientId = null;
+
+        // Set up environment info
+        document.getElementById('domain').textContent = window.location.hostname;
+        document.getElementById('userAgent').textContent = navigator.userAgent.substring(0, 100) + '...';
+        document.getElementById('firebaseProject').textContent = firebaseConfig.projectId;
+
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            output.textContent += `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+            console.log(`[${type.toUpperCase()}]`, message);
+        }
+
+        function updateStatus(elementId, message, isSuccess = true) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = isSuccess ? 'success' : 'error';
+        }
+
+        // Authentication test
+        window.testAuth = async function() {
+            try {
+                log('Testing authentication...');
+                const userCredential = await signInAnonymously(auth);
+                currentUser = userCredential.user;
+                updateStatus('authStatus', `✅ Authentication successful. User ID: ${currentUser.uid}`);
+                log(`Authentication successful. User ID: ${currentUser.uid}`);
+            } catch (error) {
+                updateStatus('authStatus', `❌ Authentication failed: ${error.message}`, false);
+                log(`Authentication failed: ${error.message}`, 'error');
+            }
+        };
+
+        // Firestore connection test
+        window.testFirestoreConnection = async function() {
+            try {
+                log('Testing Firestore connection...');
+                const testCollection = collection(db, 'connectionTest');
+                const testDoc = await addDoc(testCollection, {
+                    timestamp: new Date(),
+                    test: 'connection'
+                });
+                await deleteDoc(doc(db, 'connectionTest', testDoc.id));
+                updateStatus('firestoreStatus', '✅ Firestore connection successful');
+                log('Firestore connection successful');
+            } catch (error) {
+                updateStatus('firestoreStatus', `❌ Firestore connection failed: ${error.message}`, false);
+                log(`Firestore connection failed: ${error.message}`, 'error');
+            }
+        };
+
+        // Load clients test
+        window.testLoadClients = async function() {
+            try {
+                log('Loading closing clients...');
+                const clientsRef = collection(db, 'closingClients');
+                const snapshot = await getDocs(clientsRef);
+                const clients = [];
+                snapshot.forEach(doc => {
+                    clients.push({ id: doc.id, ...doc.data() });
+                });
+                updateStatus('clientsStatus', `✅ Loaded ${clients.length} clients`);
+                log(`Loaded ${clients.length} clients: ${JSON.stringify(clients, null, 2)}`);
+            } catch (error) {
+                updateStatus('clientsStatus', `❌ Failed to load clients: ${error.message}`, false);
+                log(`Failed to load clients: ${error.message}`, 'error');
+            }
+        };
+
+        // Save test client
+        window.testSaveClient = async function() {
+            try {
+                log('Saving test client...');
+                const testClient = {
+                    name: 'Test Client ' + Date.now(),
+                    closingDay: 15,
+                    bookkeeper: 'Nina',
+                    notes: 'Test client for Firebase connection'
+                };
+                const clientsRef = collection(db, 'closingClients');
+                const docRef = await addDoc(clientsRef, testClient);
+                testClientId = docRef.id;
+                updateStatus('clientsStatus', `✅ Test client saved with ID: ${testClientId}`);
+                log(`Test client saved with ID: ${testClientId}`);
+            } catch (error) {
+                updateStatus('clientsStatus', `❌ Failed to save test client: ${error.message}`, false);
+                log(`Failed to save test client: ${error.message}`, 'error');
+            }
+        };
+
+        // Delete test client
+        window.testDeleteTestClient = async function() {
+            if (!testClientId) {
+                updateStatus('clientsStatus', '❌ No test client to delete', false);
+                return;
+            }
+            try {
+                log('Deleting test client...');
+                await deleteDoc(doc(db, 'closingClients', testClientId));
+                updateStatus('clientsStatus', `✅ Test client deleted: ${testClientId}`);
+                log(`Test client deleted: ${testClientId}`);
+                testClientId = null;
+            } catch (error) {
+                updateStatus('clientsStatus', `❌ Failed to delete test client: ${error.message}`, false);
+                log(`Failed to delete test client: ${error.message}`, 'error');
+            }
+        };
+
+        // Load status test
+        window.testLoadStatus = async function() {
+            try {
+                log('Loading closing status...');
+                const statusRef = collection(db, 'closingStatus');
+                const snapshot = await getDocs(statusRef);
+                const statusMap = {};
+                snapshot.forEach(doc => {
+                    statusMap[doc.id] = doc.data();
+                });
+                updateStatus('statusStatus', `✅ Loaded status for ${Object.keys(statusMap).length} clients`);
+                log(`Loaded status: ${JSON.stringify(statusMap, null, 2)}`);
+            } catch (error) {
+                updateStatus('statusStatus', `❌ Failed to load status: ${error.message}`, false);
+                log(`Failed to load status: ${error.message}`, 'error');
+            }
+        };
+
+        // Save test status
+        window.testSaveStatus = async function() {
+            try {
+                log('Saving test status...');
+                const testClientId = 'test-client-' + Date.now();
+                const monthKey = '2025-01';
+                const status = 'completed';
+                
+                const statusDoc = doc(db, 'closingStatus', testClientId);
+                const statusData = { [monthKey]: status };
+                
+                try {
+                    await updateDoc(statusDoc, statusData);
+                } catch (updateError) {
+                    // Document doesn't exist, create it
+                    await setDoc(statusDoc, {
+                        ...statusData,
+                        clientId: testClientId
+                    });
+                }
+                
+                updateStatus('statusStatus', `✅ Test status saved for client: ${testClientId}`);
+                log(`Test status saved for client: ${testClientId}`);
+            } catch (error) {
+                updateStatus('statusStatus', `❌ Failed to save test status: ${error.message}`, false);
+                log(`Failed to save test status: ${error.message}`, 'error');
+            }
+        };
+
+        window.clearOutput = function() {
+            document.getElementById('output').textContent = '';
+        };
+
+        // Monitor auth state
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                log(`User signed in: ${user.uid}`);
+            } else {
+                log('User signed out');
+            }
+        });
+
+        // Auto-run basic tests
+        window.addEventListener('load', () => {
+            log('Page loaded, running initial tests...');
+            setTimeout(() => {
+                testAuth().then(() => {
+                    setTimeout(testFirestoreConnection, 1000);
+                });
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auth State Test</title>
+</head>
+<body>
+    <h1>Authentication State Test</h1>
+    <div id="auth-status">Checking authentication...</div>
+    <div id="user-info"></div>
+    <button id="login-btn" onclick="testLogin()">Test Login</button>
+    <button id="logout-btn" onclick="testLogout()">Test Logout</button>
+    
+    <script type="module">
+        import { auth } from './src/dynamic-firebase-config.js';
+        import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+        
+        const authStatus = document.getElementById('auth-status');
+        const userInfo = document.getElementById('user-info');
+        
+        // Monitor auth state
+        onAuthStateChanged(auth, (user) => {
+            console.log('Auth state changed:', user);
+            if (user) {
+                authStatus.textContent = 'User is authenticated';
+                userInfo.innerHTML = `
+                    <p>Email: ${user.email}</p>
+                    <p>UID: ${user.uid}</p>
+                    <p>Email Verified: ${user.emailVerified}</p>
+                `;
+            } else {
+                authStatus.textContent = 'User is not authenticated';
+                userInfo.innerHTML = '';
+            }
+        });
+        
+        // Test login function
+        window.testLogin = async () => {
+            try {
+                const email = prompt('Enter email:');
+                const password = prompt('Enter password:');
+                if (email && password) {
+                    await signInWithEmailAndPassword(auth, email, password);
+                    console.log('Login successful');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                alert('Login failed: ' + error.message);
+            }
+        };
+        
+        // Test logout function
+        window.testLogout = async () => {
+            try {
+                await signOut(auth);
+                console.log('Logout successful');
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+        };
+    </script>
+</body>
+</html>

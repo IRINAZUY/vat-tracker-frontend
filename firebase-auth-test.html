@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firebase Auth Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #333;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 10px;
+    }
+    .test-container {
+      background-color: #f9f9f9;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .result-container {
+      background-color: #f1f1f1;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 15px;
+      margin-top: 20px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .result-item {
+      margin: 5px 0;
+      padding: 5px;
+      border-bottom: 1px solid #eee;
+    }
+    .error {
+      color: #f44336;
+    }
+    .success {
+      color: #4CAF50;
+    }
+    .info {
+      color: #2196F3;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    code {
+      background-color: #f1f1f1;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+    .domain-info {
+      background-color: #e8f5e9;
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Firebase Authentication Test</h1>
+  
+  <div class="domain-info">
+    <p><strong>Current Domain:</strong> <span id="current-domain"></span></p>
+  </div>
+  
+  <div class="test-container">
+    <h2>Test Firebase Authentication</h2>
+    <p>This page will help you test if Firebase Authentication is properly configured for your domain.</p>
+    
+    <div>
+      <button id="test-firebase-init">Test Firebase Initialization</button>
+      <button id="test-firebase-auth">Test Firebase Auth</button>
+      <button id="test-anonymous-auth">Test Anonymous Auth</button>
+      <button id="clear-results">Clear Results</button>
+    </div>
+    
+    <div class="result-container" id="result-container">
+      <p>Results will appear here...</p>
+    </div>
+  </div>
+  
+  <div class="test-container">
+    <h2>Firebase Configuration</h2>
+    <p>Make sure your Firebase configuration is correct:</p>
+    <pre id="firebase-config">Loading configuration...</pre>
+    
+    <h3>Troubleshooting Steps</h3>
+    <ol>
+      <li>Make sure your domain is added to Firebase authorized domains</li>
+      <li>Clear your browser cache and cookies</li>
+      <li>Try using an incognito/private window</li>
+      <li>Check browser console for additional error messages</li>
+    </ol>
+  </div>
+
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <!-- Firebase Auth -->
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+  <script>
+    // Display current domain
+    document.getElementById('current-domain').textContent = window.location.hostname;
+    
+    // Function to log results
+    function logResult(message, type = 'info') {
+      const resultContainer = document.getElementById('result-container');
+      const resultItem = document.createElement('div');
+      resultItem.className = `result-item ${type}`;
+      resultItem.textContent = message;
+      resultContainer.appendChild(resultItem);
+      resultContainer.scrollTop = resultContainer.scrollHeight;
+    }
+    
+    // Clear results
+    document.getElementById('clear-results').addEventListener('click', function() {
+      document.getElementById('result-container').innerHTML = '';
+    });
+    
+    // Test Firebase initialization
+    document.getElementById('test-firebase-init').addEventListener('click', function() {
+      try {
+        // Try to get Firebase config from the page
+        let config;
+        
+        // Method 1: Look for global firebaseConfig variable
+        if (typeof firebaseConfig !== 'undefined') {
+          config = firebaseConfig;
+          logResult('✅ Found firebaseConfig global variable', 'success');
+        } 
+        // Method 2: Try to extract from existing Firebase app
+        else if (typeof firebase !== 'undefined' && firebase.app && firebase.app().options) {
+          config = firebase.app().options;
+          logResult('✅ Extracted config from existing Firebase app', 'success');
+        } 
+        // Method 3: Look for config in window object
+        else {
+          logResult('❌ Could not find Firebase configuration', 'error');
+          logResult('Please add your Firebase config to this page', 'info');
+          
+          // Prompt for Firebase config
+          const useManualConfig = confirm('Firebase config not found. Would you like to enter it manually?');
+          
+          if (useManualConfig) {
+            const configStr = prompt('Please paste your Firebase config object (as JSON):');
+            try {
+              config = JSON.parse(configStr);
+              logResult('✅ Using manually entered config', 'success');
+            } catch (e) {
+              logResult('❌ Invalid JSON configuration', 'error');
+              return;
+            }
+          } else {
+            return;
+          }
+        }
+        
+        // Display the config (with API key partially hidden)
+        const displayConfig = {...config};
+        if (displayConfig.apiKey) {
+          const key = displayConfig.apiKey;
+          displayConfig.apiKey = key.substring(0, 4) + '...' + key.substring(key.length - 4);
+        }
+        document.getElementById('firebase-config').textContent = JSON.stringify(displayConfig, null, 2);
+        
+        // Initialize Firebase if not already initialized
+        try {
+          firebase.app();
+          logResult('✅ Firebase is already initialized', 'success');
+        } catch (e) {
+          firebase.initializeApp(config);
+          logResult('✅ Firebase initialized successfully', 'success');
+        }
+      } catch (error) {
+        logResult(`❌ Firebase initialization error: ${error.message}`, 'error');
+      }
+    });
+    
+    // Test Firebase Auth
+    document.getElementById('test-firebase-auth').addEventListener('click', function() {
+      if (typeof firebase === 'undefined' || !firebase.auth) {
+        logResult('❌ Firebase Auth is not available. Initialize Firebase first.', 'error');
+        return;
+      }
+      
+      logResult('🔄 Testing Firebase Auth...', 'info');
+      
+      try {
+        // Get Firebase Auth instance
+        const auth = firebase.auth();
+        
+        // Try a simple operation that will trigger CORS check
+        auth.getRedirectResult()
+          .then(() => {
+            logResult('✅ Firebase Auth operation successful!', 'success');
+            logResult('🎉 No CORS issues detected with your domain!', 'success');
+          })
+          .catch(error => {
+            logResult(`❌ Firebase Auth operation failed: ${error.message}`, 'error');
+            
+            if (error.message && error.message.includes('cors')) {
+              logResult('🚫 CORS ERROR DETECTED!', 'error');
+              logResult(`Add "${window.location.hostname}" to Firebase authorized domains`, 'info');
+            }
+          });
+      } catch (e) {
+        logResult(`❌ Error accessing Firebase Auth: ${e.message}`, 'error');
+      }
+    });
+    
+    // Test Anonymous Auth
+    document.getElementById('test-anonymous-auth').addEventListener('click', function() {
+      if (typeof firebase === 'undefined' || !firebase.auth) {
+        logResult('❌ Firebase Auth is not available. Initialize Firebase first.', 'error');
+        return;
+      }
+      
+      logResult('🔄 Testing Anonymous Auth...', 'info');
+      
+      try {
+        const auth = firebase.auth();
+        
+        auth.signInAnonymously()
+          .then(() => {
+            logResult('✅ Anonymous authentication successful!', 'success');
+            logResult('✅ Your domain is properly configured!', 'success');
+            
+            // Sign out after successful test
+            auth.signOut().then(() => {
+              logResult('ℹ️ Signed out successfully', 'info');
+            });
+          })
+          .catch(error => {
+            if (error.code === 'auth/operation-not-allowed') {
+              logResult('ℹ️ Anonymous auth is not enabled in your Firebase project', 'info');
+              logResult('This is normal if you haven\'t enabled anonymous auth', 'info');
+            } else if (error.message && error.message.includes('cors')) {
+              logResult('❌ CORS error detected with anonymous auth', 'error');
+              logResult(`Add "${window.location.hostname}" to Firebase authorized domains`, 'info');
+            } else {
+              logResult(`❌ Error with anonymous auth: ${error.message}`, 'error');
+            }
+          });
+      } catch (e) {
+        logResult(`❌ Error with anonymous auth: ${e.message}`, 'error');
+      }
+    });
+    
+    // Auto-run Firebase initialization test when page loads
+    window.addEventListener('DOMContentLoaded', function() {
+      // Wait a moment for any existing Firebase to initialize
+      setTimeout(() => {
+        document.getElementById('test-firebase-init').click();
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

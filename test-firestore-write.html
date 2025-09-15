@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Firestore Write Operations</title>
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
+
+        // Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyC7Q5Ffw_vUqt6RZ2beYJBYpYDjGyIXuD0",
+            authDomain: "vat-tracker-uae.firebaseapp.com",
+            projectId: "vat-tracker-uae",
+            storageBucket: "vat-tracker-uae.appspot.com",
+            messagingSenderId: "788842579308",
+            appId: "1:788842579308:web:77c20cdef9ffa75364df49"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        let currentUser = null;
+
+        // Monitor auth state
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            updateUI();
+        });
+
+        function updateUI() {
+            const authStatus = document.getElementById('auth-status');
+            const testSection = document.getElementById('test-section');
+            
+            if (currentUser) {
+                authStatus.innerHTML = `✅ Logged in as: ${currentUser.email}`;
+                testSection.style.display = 'block';
+            } else {
+                authStatus.innerHTML = '❌ Not logged in';
+                testSection.style.display = 'none';
+            }
+        }
+
+        // Login function
+        window.login = async () => {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                document.getElementById('login-result').innerHTML = '✅ Login successful!';
+            } catch (error) {
+                document.getElementById('login-result').innerHTML = `❌ Login failed: ${error.message}`;
+            }
+        };
+
+        // Test write to closingClients
+        window.testWriteClient = async () => {
+            if (!currentUser) {
+                alert('Please login first');
+                return;
+            }
+
+            const resultDiv = document.getElementById('write-result');
+            resultDiv.innerHTML = 'Testing write operation...';
+
+            try {
+                const testClient = {
+                    name: 'Test Client ' + new Date().toISOString(),
+                    closingDay: 15,
+                    bookkeeper: 'Nina',
+                    notes: 'Test client created at ' + new Date().toLocaleString()
+                };
+
+                console.log('Attempting to write client:', testClient);
+                const docRef = await addDoc(collection(db, 'closingClients'), testClient);
+                
+                resultDiv.innerHTML = `✅ SUCCESS! Client written with ID: ${docRef.id}`;
+                console.log('Write successful, document ID:', docRef.id);
+                
+            } catch (error) {
+                resultDiv.innerHTML = `❌ WRITE FAILED: ${error.code} - ${error.message}`;
+                console.error('Write failed:', error);
+                
+                if (error.code === 'permission-denied') {
+                    resultDiv.innerHTML += '<br><strong>This confirms the Firestore security rules are blocking writes!</strong>';
+                }
+            }
+        };
+
+        // Test read from closingClients
+        window.testReadClients = async () => {
+            if (!currentUser) {
+                alert('Please login first');
+                return;
+            }
+
+            const resultDiv = document.getElementById('read-result');
+            resultDiv.innerHTML = 'Testing read operation...';
+
+            try {
+                const querySnapshot = await getDocs(collection(db, 'closingClients'));
+                const clients = [];
+                querySnapshot.forEach((doc) => {
+                    clients.push({ id: doc.id, ...doc.data() });
+                });
+                
+                resultDiv.innerHTML = `✅ READ SUCCESS! Found ${clients.length} clients`;
+                document.getElementById('clients-data').innerHTML = JSON.stringify(clients, null, 2);
+                
+            } catch (error) {
+                resultDiv.innerHTML = `❌ READ FAILED: ${error.code} - ${error.message}`;
+                console.error('Read failed:', error);
+            }
+        };
+
+        // Test write to closingStatus
+        window.testWriteStatus = async () => {
+            if (!currentUser) {
+                alert('Please login first');
+                return;
+            }
+
+            const resultDiv = document.getElementById('status-result');
+            resultDiv.innerHTML = 'Testing status write operation...';
+
+            try {
+                const testStatus = {
+                    '2025-01': 'VERIFIED_CLOSED',
+                    clientId: 'test-client-' + Date.now()
+                };
+
+                console.log('Attempting to write status:', testStatus);
+                const docRef = await addDoc(collection(db, 'closingStatus'), testStatus);
+                
+                resultDiv.innerHTML = `✅ SUCCESS! Status written with ID: ${docRef.id}`;
+                console.log('Status write successful, document ID:', docRef.id);
+                
+            } catch (error) {
+                resultDiv.innerHTML = `❌ STATUS WRITE FAILED: ${error.code} - ${error.message}`;
+                console.error('Status write failed:', error);
+                
+                if (error.code === 'permission-denied') {
+                    resultDiv.innerHTML += '<br><strong>This confirms the Firestore security rules are blocking writes!</strong>';
+                }
+            }
+        };
+    </script>
+</head>
+<body>
+    <h1>🔥 Firestore Write Test for Closing Dashboard</h1>
+    
+    <div style="background: #f0f0f0; padding: 20px; margin: 20px 0; border-radius: 8px;">
+        <h2>Authentication</h2>
+        <p id="auth-status">Checking authentication...</p>
+        
+        <div style="margin: 10px 0;">
+            <input type="email" id="email" placeholder="Email" style="margin-right: 10px; padding: 8px;">
+            <input type="password" id="password" placeholder="Password" style="margin-right: 10px; padding: 8px;">
+            <button onclick="login()" style="padding: 8px 16px;">Login</button>
+        </div>
+        <p id="login-result"></p>
+    </div>
+
+    <div id="test-section" style="display: none;">
+        <div style="background: #e8f5e8; padding: 20px; margin: 20px 0; border-radius: 8px;">
+            <h2>Test Firestore Operations</h2>
+            
+            <div style="margin: 15px 0;">
+                <button onclick="testReadClients()" style="padding: 10px 20px; margin-right: 10px; background: #4CAF50; color: white; border: none; border-radius: 4px;">Test Read Clients</button>
+                <p id="read-result"></p>
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <button onclick="testWriteClient()" style="padding: 10px 20px; margin-right: 10px; background: #2196F3; color: white; border: none; border-radius: 4px;">Test Write Client</button>
+                <p id="write-result"></p>
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <button onclick="testWriteStatus()" style="padding: 10px 20px; margin-right: 10px; background: #FF9800; color: white; border: none; border-radius: 4px;">Test Write Status</button>
+                <p id="status-result"></p>
+            </div>
+        </div>
+
+        <div style="background: #fff3cd; padding: 20px; margin: 20px 0; border-radius: 8px;">
+            <h3>Existing Clients Data:</h3>
+            <pre id="clients-data" style="background: white; padding: 10px; border-radius: 4px; overflow: auto;">Click 'Test Read Clients' to load data</pre>
+        </div>
+
+        <div style="background: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 8px;">
+            <h3>🚨 If Write Operations Fail:</h3>
+            <p>The issue is with <strong>Firestore Security Rules</strong>. You need to:</p>
+            <ol>
+                <li>Go to <a href="https://console.firebase.google.com/project/vat-tracker-uae/firestore/rules" target="_blank">Firebase Console - Firestore Rules</a></li>
+                <li>Replace the existing rules with:</li>
+            </ol>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 15px; border-radius: 4px; overflow: auto;">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow authenticated users to read and write closing clients
+    match /closingClients/{document} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Allow authenticated users to read and write closing status
+    match /closingStatus/{document} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Allow authenticated users to read and write user data
+    match /users/{document} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}</pre>
+            <p><strong>3. Click 'Publish' to apply the rules</strong></p>
+            <p><strong>4. Wait 1 minute for rules to take effect, then test again</strong></p>
+        </div>
+    </div>
+</body>
+</html>

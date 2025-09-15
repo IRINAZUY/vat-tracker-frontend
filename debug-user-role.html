@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug User Role</title>
+    <script type="module">
+        // Import Firebase
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
+        import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+        import { getAuth, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js';
+
+        // Firebase config
+        const firebaseConfig = {
+            apiKey: "AIzaSyDGpAHia_wEmrhnmYjrPf1n2Wn3NG2R0Hs",
+            authDomain: "vat-tracker-uae.firebaseapp.com",
+            projectId: "vat-tracker-uae",
+            storageBucket: "vat-tracker-uae.appspot.com",
+            messagingSenderId: "1065718645370",
+            appId: "1:1065718645370:web:f6d8b7b4d7b4c7b4c7b4c7"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Check user role
+        onAuthStateChanged(auth, async (user) => {
+            const output = document.getElementById('output');
+            if (user) {
+                output.innerHTML += `<p><strong>User Email:</strong> ${user.email}</p>`;
+                output.innerHTML += `<p><strong>User UID:</strong> ${user.uid}</p>`;
+                
+                try {
+                    const userRef = doc(db, "users", user.uid);
+                    const userSnap = await getDoc(userRef);
+                    
+                    if (userSnap.exists()) {
+                        const userData = userSnap.data();
+                        output.innerHTML += `<p><strong>User Document Exists:</strong> Yes</p>`;
+                        output.innerHTML += `<p><strong>User Role:</strong> ${userData.role || 'No role field'}</p>`;
+                        output.innerHTML += `<p><strong>Is Admin:</strong> ${userData.role === 'admin' ? 'Yes' : 'No'}</p>`;
+                        output.innerHTML += `<p><strong>Full User Data:</strong> ${JSON.stringify(userData, null, 2)}</p>`;
+                    } else {
+                        output.innerHTML += `<p><strong>User Document Exists:</strong> No</p>`;
+                        output.innerHTML += `<p style="color: red;">This is the problem! User document doesn't exist in Firestore.</p>`;
+                    }
+                } catch (error) {
+                    output.innerHTML += `<p><strong>Error:</strong> ${error.message}</p>`;
+                }
+            } else {
+                output.innerHTML += `<p><strong>User:</strong> Not logged in</p>`;
+            }
+        });
+    </script>
+</head>
+<body>
+    <h1>Debug User Role</h1>
+    <div id="output">
+        <p>Loading...</p>
+    </div>
+</body>
+</html>
