@@ -1626,4 +1626,5 @@ const TableView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, onEdit
       </div>
     </Card>
   );
-}
+}/ /   F o r c e   d e p l o y m e n t   t r i g g e r  
+ 
