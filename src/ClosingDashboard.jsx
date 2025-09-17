@@ -12,59 +12,48 @@ import { signOut } from "firebase/auth";
 import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc, getDoc, setDoc, onSnapshot, query, where } from "firebase/firestore";
 import UnifiedHeader from "./components/UnifiedHeader";
 import BottomRightLogo from "./components/BottomRightLogo";
-import { useToast } from "./components/Toast";
+import { useToast } from './components/Toast';
 
-// Helper constants
+// Constants
 const DAY_BUCKETS = [10, 15, 20, 25, 30];
 const BOOKKEEPERS = ["Nina", "Maria", "Arlyn", "Olya"];
 
 // Date utilities
-const monthKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-const firstOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
 const addMonths = (date, months) => {
   const result = new Date(date);
   result.setMonth(result.getMonth() + months);
   return result;
 };
 
-// Due date calculation
 const getDueDate = (reportingMonth, closingDay) => {
-  // The due date is the closing day of the current reporting month
-  const dueDate = new Date(reportingMonth.getFullYear(), reportingMonth.getMonth(), closingDay);
-  console.log(`Due date for closing day ${closingDay}:`, dueDate.toDateString());
-  return dueDate;
+  const nextMonth = addMonths(reportingMonth, 1);
+  return new Date(nextMonth.getFullYear(), nextMonth.getMonth(), closingDay);
 };
 
-// Status checking
 const isOverdue = (dueDate) => {
   const today = new Date();
-  const result = today > dueDate;
-  console.log(`Overdue check - Today: ${today.toDateString()}, Due: ${dueDate.toDateString()}, Overdue: ${result}`);
-  return result;
+  today.setHours(0, 0, 0, 0);
+  return dueDate < today;
 };
 const isDueSoon = (dueDate) => {
   const today = new Date();
-  const diffTime = dueDate - today;
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  const result = diffDays <= 3 && diffDays > 0;
-  console.log(`Due soon check - Today: ${today.toDateString()}, Due: ${dueDate.toDateString()}, Days diff: ${diffDays}, Due soon: ${result}`);
-  return result;
+  today.setHours(0, 0, 0, 0);
+  const threeDaysFromNow = new Date(today);
+  threeDaysFromNow.setDate(today.getDate() + 3);
+  return dueDate >= today && dueDate <= threeDaysFromNow;
 };
 
-// Percentage calculation
-const pct = (num, total) => total === 0 ? 0 : Math.round((num / total) * 100);
-
-// LocalStorage functions
-// Firestore operations for closing dashboard
+// Firestore operations
 const loadClosingClients = async () => {
   try {
     console.log('Loading closing clients from Firestore...');
     const clientsRef = collection(db, "closingClients");
     const snap = await getDocs(clientsRef);
-    const clients = snap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const clients = [];
+    snap.docs.forEach(doc => {
+      console.log('Client document:', doc.id, doc.data());
+      clients.push({ id: doc.id, ...doc.data() });
+    });
     console.log('Loaded closing clients:', clients);
     return clients;
   } catch (error) {
@@ -75,41 +64,42 @@ const loadClosingClients = async () => {
 
 const saveClosingClient = async (client) => {
   try {
-    console.log('Attempting to save client:', client);
-    console.log('Current user:', auth.currentUser?.email);
-    
-    const clientsRef = collection(db, "closingClients");
+    console.log('Saving closing client:', client);
     if (client.id) {
-      // Update existing client - exclude id from the data
-      const { id, ...clientData } = client;
-      const clientDoc = doc(db, "closingClients", id);
-      console.log('Updating client with ID:', id, 'Data:', clientData);
-      await updateDoc(clientDoc, clientData);
-      console.log('Successfully updated closing client:', id);
+      // Update existing client
+      const clientRef = doc(db, "closingClients", client.id);
+      await updateDoc(clientRef, {
+        name: client.name,
+        closingDay: client.closingDay,
+        bookkeeper: client.bookkeeper,
+        notes: client.notes || "",
+        updatedAt: new Date()
+      });
     } else {
-      // Add new client with user identification
-      const clientWithUser = {
-        ...client,
-        createdBy: auth.currentUser.uid,
-        createdAt: new Date()
-      };
-      console.log('Adding new client:', clientWithUser);
-      const docRef = await addDoc(clientsRef, clientWithUser);
-      console.log('Successfully added new closing client with ID:', docRef.id);
-      return docRef.id;
+      // Add new client
+      const clientsRef = collection(db, "closingClients");
+      await addDoc(clientsRef, {
+        name: client.name,
+        closingDay: client.closingDay,
+        bookkeeper: client.bookkeeper,
+        notes: client.notes || "",
+        createdAt: new Date(),
+        createdBy: auth.currentUser?.uid
+      });
     }
+    console.log('Client saved successfully');
   } catch (error) {
     console.error('Failed to save closing client:', error);
-    console.error('Error details:', error.code, error.message);
     throw error;
   }
 };
 
 const deleteClosingClient = async (clientId) => {
   try {
-    const clientDoc = doc(db, "closingClients", clientId);
-    await deleteDoc(clientDoc);
-    console.log('Deleted closing client:', clientId);
+    console.log('Deleting closing client:', clientId);
+    const clientRef = doc(db, "closingClients", clientId);
+    await deleteDoc(clientRef);
+    console.log('Client deleted successfully');
   } catch (error) {
     console.error('Failed to delete closing client:', error);
     throw error;
@@ -135,109 +125,99 @@ const loadClosingStatus = async () => {
 
 const saveClosingStatus = async (clientId, monthKey, status) => {
   try {
-    const statusDoc = doc(db, "closingStatus", clientId);
-    const statusData = { [monthKey]: status };
-    await updateDoc(statusDoc, statusData).catch(async () => {
-      // Document doesn't exist, create it with clientId as document ID
-      await setDoc(statusDoc, {
-        ...statusData,
-        clientId: clientId
+    console.log('Saving closing status:', { clientId, monthKey, status });
+    const statusRef = doc(db, "closingStatus", clientId);
+    const statusDoc = await getDoc(statusRef);
+    
+    if (statusDoc.exists()) {
+      // Update existing status
+      const currentData = statusDoc.data();
+      await updateDoc(statusRef, {
+        ...currentData,
+        [monthKey]: status,
+        updatedAt: new Date()
       });
-    });
-    console.log('Updated closing status:', clientId, monthKey, status);
+    } else {
+      // Create new status document
+      await setDoc(statusRef, {
+        [monthKey]: status,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
+    console.log('Status saved successfully');
   } catch (error) {
     console.error('Failed to save closing status:', error);
     throw error;
   }
 };
 
-// Firestore operations for comments
-const loadClosingComments = async () => {
-  try {
-    console.log('Loading closing comments from Firestore...');
-    const commentsRef = collection(db, "closingComments");
-    const snap = await getDocs(commentsRef);
-    const comments = {};
-    snap.docs.forEach(doc => {
-      comments[doc.id] = doc.data().comment;
-    });
-    console.log('Loaded closing comments:', comments);
-    return comments;
-  } catch (error) {
-    console.error('Failed to load closing comments:', error);
-    return {};
-  }
-};
-
-const saveClosingComment = async (clientId, comment) => {
-  try {
-    console.log('Saving closing comment:', { clientId, comment });
-    const commentRef = doc(db, "closingComments", clientId);
-    await setDoc(commentRef, {
-      comment: comment,
-      updatedAt: new Date(),
-      updatedBy: auth.currentUser?.uid
-    });
-    console.log('Comment saved successfully');
-  } catch (error) {
-    console.error('Failed to save closing comment:', error);
-    throw error;
-  }
-};
-
-// Migration function to move localStorage data to Firestore
+// Migration function
 const migrateLocalStorageToFirestore = async () => {
   try {
-    // Check if localStorage has data
-    const localClients = localStorage.getItem('LS_CLIENTS');
-    const localStatus = localStorage.getItem('LS_STATUS');
+    console.log('Starting migration from localStorage to Firestore...');
     
-    if (!localClients && !localStatus) {
-      console.log('No localStorage data found to migrate');
-      return { success: true, message: 'No data to migrate' };
+    // Get data from localStorage
+    const clientsData = localStorage.getItem('closingClients');
+    const statusData = localStorage.getItem('closingStatus');
+    
+    if (!clientsData && !statusData) {
+      return { success: false, message: '❌ No data found in localStorage to migrate.' };
     }
     
     let migratedClients = 0;
-    let migratedStatus = 0;
+    let migratedStatuses = 0;
     
     // Migrate clients
-    if (localClients) {
-      const clients = JSON.parse(localClients);
+    if (clientsData) {
+      const clients = JSON.parse(clientsData);
       for (const client of clients) {
-        await saveClosingClient(client);
-        migratedClients++;
-      }
-    }
-    
-    // Migrate status data
-    if (localStatus) {
-      const statusData = JSON.parse(localStatus);
-      for (const [clientId, monthData] of Object.entries(statusData)) {
-        for (const [monthKey, status] of Object.entries(monthData)) {
-          await saveClosingStatus(clientId, monthKey, status);
-          migratedStatus++;
+        try {
+          // Check if client already exists in Firestore
+          const existingClients = await loadClosingClients();
+          const exists = existingClients.some(c => c.name === client.name && c.closingDay === client.closingDay);
+          
+          if (!exists) {
+            await saveClosingClient({
+              name: client.name,
+              closingDay: client.closingDay,
+              bookkeeper: client.bookkeeper,
+              notes: client.notes || ""
+            });
+            migratedClients++;
+          }
+        } catch (error) {
+          console.error('Failed to migrate client:', client, error);
         }
       }
     }
     
-    // Clear localStorage after successful migration
-    localStorage.removeItem('LS_CLIENTS');
-    localStorage.removeItem('LS_STATUS');
+    // Migrate status
+    if (statusData) {
+      const statusMap = JSON.parse(statusData);
+      for (const [clientId, statuses] of Object.entries(statusMap)) {
+        try {
+          for (const [monthKey, status] of Object.entries(statuses)) {
+            await saveClosingStatus(clientId, monthKey, status);
+          }
+          migratedStatuses++;
+        } catch (error) {
+          console.error('Failed to migrate status for client:', clientId, error);
+        }
+      }
+    }
     
-    return {
-      success: true,
-      message: `Successfully migrated ${migratedClients} clients and ${migratedStatus} status records`
+    return { 
+      success: true, 
+      message: `✅ Migration completed! Migrated ${migratedClients} clients and ${migratedStatuses} status records.` 
     };
   } catch (error) {
     console.error('Migration failed:', error);
-    return {
-      success: false,
-      message: `Migration failed: ${error.message}`
-    };
+    return { success: false, message: '❌ Migration failed. Please try again.' };
   }
 };
 
-// Styled components
+// Styles
 const btnPrimary = {
   padding: "8px 16px",
   borderRadius: 6,
@@ -266,23 +246,30 @@ const input = {
   fontSize: 14,
 };
 
-// UI Components
+// Components
 const Pill = ({ children, color = "gray" }) => {
   const colors = {
     green: { background: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
-    orange: { background: "#fed7aa", color: "#c2410c", border: "#fdba74" },
-    gray: { background: "#f3f4f6", color: "#374151", border: "#e5e7eb" },
+    orange: { background: "#fed7aa", color: "#ea580c", border: "#fdba74" },
+    red: { background: "#fecaca", color: "#dc2626", border: "#fca5a5" },
+    blue: { background: "#dbeafe", color: "#2563eb", border: "#93c5fd" },
+    purple: { background: "#e9d5ff", color: "#7c3aed", border: "#c4b5fd" },
+    gray: { background: "#f3f4f6", color: "#374151", border: "#d1d5db" },
   };
+  
   const style = colors[color] || colors.gray;
+  
   return (
     <span
       style={{
-        ...style,
-        padding: "4px 8px",
+        display: "inline-block",
+        padding: "2px 8px",
         borderRadius: 12,
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: 500,
         border: `1px solid ${style.border}`,
+        background: style.background,
+        color: style.color,
       }}
     >
       {children}
@@ -290,41 +277,13 @@ const Pill = ({ children, color = "gray" }) => {
   );
 };
 
-const Tiny = ({ children, style = {} }) => (
-  <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 500, ...style }}>
-    {children}
-  </span>
-);
-
-const Progress = ({ value, max }) => (
-  <div
-    style={{
-      width: "100%",
-      height: 8,
-      background: "#e5e7eb",
-      borderRadius: 4,
-      overflow: "hidden",
-    }}
-  >
-    <div
-      style={{
-        width: `${pct(value, max)}%`,
-        height: "100%",
-        background: "#15803d",
-        transition: "width 0.3s ease",
-      }}
-    />
-  </div>
-);
-
 const Card = ({ children, style = {} }) => (
   <div
     style={{
       background: "#fff",
       borderRadius: 8,
-      padding: 16,
-      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
       border: "1px solid #e5e7eb",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
       ...style,
     }}
   >
@@ -333,360 +292,328 @@ const Card = ({ children, style = {} }) => (
 );
 
 const Column = ({ title, children }) => (
-  <div style={{ flex: 1, minWidth: 280, marginRight: 16 }}>
+  <div
+    style={{
+      minWidth: 280,
+      background: "#f8fafc",
+      borderRadius: 8,
+      border: "1px solid #e2e8f0",
+      padding: 16,
+    }}
+  >
     <h3
       style={{
-        margin: "0 0 12px 0",
-        padding: "12px 16px",
-        background: "#fff",
-        borderRadius: 8,
-        fontSize: 18,
-        fontWeight: 700,
-        color: "#15803d",
+        margin: "0 0 16px 0",
+        fontSize: 16,
+        fontWeight: 600,
+        color: "#1f2937",
         textAlign: "center",
-        letterSpacing: "0.5px",
-        border: "2px solid #15803d",
       }}
     >
       {title}
     </h3>
-    <div style={{ display: "grid", gap: 8 }}>{children}</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {children}
+    </div>
   </div>
 );
 
-// Client Card Component
+const pct = (a, b) => (b === 0 ? 0 : Math.round((a / b) * 100));
+
 const ClientCard = ({ client, status, dueDate, onToggleStatus, onEdit, onDelete, onFilterBookkeeper, isAdmin }) => {
   const isVerified = status === "VERIFIED_CLOSED";
   const overdue = isOverdue(dueDate);
   const dueSoon = isDueSoon(dueDate);
+  
+  const getStatusColor = () => {
+    if (isVerified) return "green";
+    if (overdue) return "red";
+    if (dueSoon) return "orange";
+    return "gray";
+  };
 
-  // Status icons - hourglass for pending, checkmark for closed
-  const StatusIcon = ({ status }) => {
-    if (status === "VERIFIED_CLOSED") {
-      return (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ marginLeft: 8 }}>
-          <path d="M9 12l2 2 4-4" stroke="#15803d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          <circle cx="12" cy="12" r="10" stroke="#15803d" strokeWidth="2"/>
-        </svg>
-      );
-    }
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ marginLeft: 8 }}>
-        <path d="M12 6v6l4 2" stroke="#ea580c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        <circle cx="12" cy="12" r="10" stroke="#ea580c" strokeWidth="2"/>
-      </svg>
-    );
+  const getStatusText = () => {
+    if (isVerified) return "Verified & Closed";
+    if (overdue) return "Overdue";
+    if (dueSoon) return "Due Soon";
+    return "Pending";
   };
 
   return (
-    <Card
-      style={{
-        padding: 16,
-        border: overdue ? "2px solid #ef4444" : "1px solid #e5e7eb",
-        position: "relative",
-        minHeight: 180,
-        background: isVerified ? "#f0fdf4" : (dueSoon && status === "PENDING" ? "#fef2f2" : "#fff"),
-      }}
-    >
-      {!isVerified && dueSoon && !overdue && (
-        <div
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            width: 12,
-            height: 12,
-            borderRadius: "50%",
-            background: "#ef4444",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#fff",
-            fontSize: 8,
-            fontWeight: "bold",
-          }}
-        >
-          !
+    <Card style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <h4 style={{ margin: "0 0 4px 0", fontSize: 16, fontWeight: 600, color: "#1f2937" }}>
+            {client.name}
+          </h4>
+          <div style={{ fontSize: 14, color: "#6b7280", marginBottom: 8 }}>
+            Due: {dueDate.toLocaleDateString()}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <Pill color="blue">Day {client.closingDay}</Pill>
+            <Pill 
+              color="purple"
+              style={{ cursor: "pointer" }}
+              onClick={() => onFilterBookkeeper(client.bookkeeper)}
+            >
+              {client.bookkeeper}
+            </Pill>
+          </div>
+          <Pill color={getStatusColor()}>
+            {getStatusText()}
+          </Pill>
+        </div>
+      </div>
+      
+      {client.notes && (
+        <div style={{ 
+          fontSize: 13, 
+          color: "#6b7280", 
+          fontStyle: "italic", 
+          marginBottom: 12,
+          padding: "8px",
+          background: "#f9fafb",
+          borderRadius: 4,
+          border: "1px solid #f3f4f6"
+        }}>
+          {client.notes}
         </div>
       )}
       
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12, color: isVerified ? "#15803d" : "#1f2937", textAlign: "center" }}>
-          {client.name}
-        </div>
-        
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-          <div
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: "50%",
-              background: "#15803d",
-              color: "#fff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 12,
-              fontWeight: 600,
-              flexShrink: 0,
-            }}
-          >
-            {client.closingDay}
-          </div>
-          <button
-            onClick={() => onFilterBookkeeper(client.bookkeeper)}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#6b7280",
-              fontSize: 13,
-              cursor: "pointer",
-              padding: 0,
-              textDecoration: "underline",
-            }}
-          >
-            {client.bookkeeper}
-          </button>
-        </div>
-      </div>
-      
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, minHeight: 32 }}>
-        <div style={{ flex: 1 }}>
-          {!isVerified && overdue && (
-            <Tiny style={{ color: "#FF6347", display: "block", fontWeight: "bold" }}>⚠︎ OVERDUE</Tiny>
-          )}
-          {!isVerified && dueSoon && !overdue && (
-            <Tiny style={{ color: "#FF6347", display: "block", fontWeight: "bold" }}>⚠︎ Due in {Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24))} days</Tiny>
-          )}
-        </div>
-        
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ transform: "scale(1.1)" }}>
-            <Pill color={isVerified ? "green" : "orange"}>
-              {isVerified ? "CLOSED" : "PENDING"}
-            </Pill>
-          </div>
-          <StatusIcon status={status} />
-        </div>
-      </div>
-      
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {(!isVerified || isAdmin) && (
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button
           onClick={() => onToggleStatus(client)}
           style={{
-            padding: "12px 16px",
-            borderRadius: 6,
-            border: "none",
-            background: isVerified ? "#fef3c7" : "#15803d",
-            color: isVerified ? "#92400e" : "#fff",
-            cursor: "pointer",
-            fontSize: 14,
-            fontWeight: 600,
-            width: "100%",
+            ...btnSecondary,
+            background: isVerified ? "#dcfce7" : "#fff",
+            color: isVerified ? "#15803d" : "#374151",
+            border: `1px solid ${isVerified ? "#bbf7d0" : "#e5e7eb"}`,
+            fontSize: 12,
+            padding: "6px 12px",
           }}
         >
-          {isVerified ? "Mark Pending" : "Verified & Closed"}
+          {isVerified ? "✓ Verified" : "Mark Complete"}
         </button>
-      )}
         
         {isAdmin && (
-          <div style={{ display: "flex", gap: 6 }}>
+          <>
             <button
               onClick={() => onEdit(client)}
               style={{
                 ...btnSecondary,
-                padding: "8px 12px",
                 fontSize: 12,
-                flex: 1,
+                padding: "6px 12px",
               }}
             >
-              Edit
+              ✏️ Edit
             </button>
             <button
               onClick={() => onDelete(client)}
               style={{
                 ...btnSecondary,
-                padding: "8px 12px",
+                color: "#dc2626",
+                border: "1px solid #fca5a5",
                 fontSize: 12,
-                color: "#FF6347",
-                borderColor: "#fca5a5",
-                flex: 1,
+                padding: "6px 12px",
               }}
             >
-              Delete
+              🗑️ Delete
             </button>
-          </div>
+          </>
         )}
       </div>
     </Card>
   );
 }
 
-// Enhanced Modal with Notes field
+// Modal Component
 const Modal = ({ open, onClose, initial, onSave }) => {
-  const [name, setName] = useState(initial?.name || "");
-  const [closingDay, setClosingDay] = useState(initial?.closingDay || 10);
-  const [bookkeeper, setBookkeeper] = useState(initial?.bookkeeper || BOOKKEEPERS[0]);
-  const [notes, setNotes] = useState(initial?.notes || "");
+  const [name, setName] = useState("");
+  const [closingDay, setClosingDay] = useState("");
+  const [bookkeeper, setBookkeeper] = useState("");
+  const [notes, setNotes] = useState("");
 
   useEffect(() => {
-    if (open) {
-      setName(initial?.name || "");
-      setClosingDay(initial?.closingDay || 10);
-      setBookkeeper(initial?.bookkeeper || BOOKKEEPERS[0]);
-      setNotes(initial?.notes || "");
+    if (initial) {
+      setName(initial.name || "");
+      setClosingDay(initial.closingDay || "");
+      setBookkeeper(initial.bookkeeper || "");
+      setNotes(initial.notes || "");
+    } else {
+      setName("");
+      setClosingDay("");
+      setBookkeeper("");
+      setNotes("");
     }
-  }, [open, initial]);
+  }, [initial, open]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name.trim() || !closingDay || !bookkeeper) {
+      alert("Please fill in all required fields");
+      return;
+    }
+    onSave({ name: name.trim(), closingDay: Number(closingDay), bookkeeper, notes: notes.trim() });
+  };
 
   if (!open) return null;
 
-  const handleSave = () => {
-    if (!name.trim()) {
-      showToast("Client name is required", "error");
-      return;
-    }
-    onSave({ name: name.trim(), closingDay, bookkeeper, notes: notes.trim() });
-  };
-
   return (
     <div
-      onClick={onClose}
       style={{
         position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,.25)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 50,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
       }}
+      onClick={onClose}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
-          width: 420,
           background: "#fff",
-          borderRadius: 10,
-          padding: 16,
-          boxShadow: "0 8px 30px rgba(0,0,0,.2)",
+          borderRadius: 8,
+          padding: 24,
+          width: "90%",
+          maxWidth: 500,
+          boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
         }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ margin: 0, marginBottom: 12 }}>
+        <h2 style={{ margin: "0 0 20px 0", fontSize: 20, fontWeight: 600, color: "#1f2937" }}>
           {initial ? "Edit Client" : "Add New Client"}
-        </h3>
-
-        <div style={{ display: "grid", gap: 10 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <Tiny>Client Name *</Tiny>
+        </h2>
+        
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Client Name *
+            </label>
             <input
+              type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              style={input}
+              style={{ ...input, width: "100%", boxSizing: "border-box" }}
               placeholder="Enter client name"
+              required
             />
-          </label>
-
-          <label style={{ display: "grid", gap: 6 }}>
-            <Tiny>Closing Day (1–31)</Tiny>
+          </div>
+          
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Closing Day *
+            </label>
             <select
               value={closingDay}
-              onChange={(e) => setClosingDay(Number(e.target.value))}
-              style={input}
+              onChange={(e) => setClosingDay(e.target.value)}
+              style={{ ...input, width: "100%", boxSizing: "border-box" }}
+              required
             >
-              {Array.from({ length: 31 }).map((_, i) => (
-                <option key={i + 1} value={i + 1}>
-                  {i + 1}
-                </option>
+              <option value="">Select closing day</option>
+              {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                <option key={day} value={day}>{day}</option>
               ))}
             </select>
-          </label>
-
-          <label style={{ display: "grid", gap: 6 }}>
-            <Tiny>Bookkeeper</Tiny>
+          </div>
+          
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Bookkeeper *
+            </label>
             <select
               value={bookkeeper}
               onChange={(e) => setBookkeeper(e.target.value)}
-              style={input}
+              style={{ ...input, width: "100%", boxSizing: "border-box" }}
+              required
             >
-              {BOOKKEEPERS.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
+              <option value="">Select bookkeeper</option>
+              {BOOKKEEPERS.map(keeper => (
+                <option key={keeper} value={keeper}>{keeper}</option>
               ))}
             </select>
-          </label>
-
-          <label style={{ display: "grid", gap: 6 }}>
-            <Tiny>Notes (optional)</Tiny>
+          </div>
+          
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500, color: "#374151" }}>
+              Notes
+            </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              style={{
-                ...input,
-                minHeight: 60,
+              style={{ 
+                ...input, 
+                width: "100%", 
+                boxSizing: "border-box",
+                minHeight: 80,
                 resize: "vertical",
+                fontFamily: "inherit"
               }}
-              placeholder="Add any additional notes..."
+              placeholder="Optional notes about this client"
             />
-          </label>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            marginTop: 14,
-          }}
-        >
-          <button onClick={onClose} style={btnSecondary}>
-            Cancel
-          </button>
-          <button onClick={handleSave} style={btnPrimary}>
-            Save
-          </button>
-        </div>
+          </div>
+          
+          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={btnSecondary}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              style={btnPrimary}
+            >
+              {initial ? "Update Client" : "Add Client"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 };
 
-// Main Dashboard Component
+// Main Component
 export default function ClosingDashboard() {
+  const { showToast, ToastContainer } = useToast();
   const navigate = useNavigate();
   const [user, loading] = useAuthState(auth);
-  const { showToast, ToastContainer } = useToast();
   const [clients, setClients] = useState([]);
   const [statusMap, setStatusMap] = useState({});
-  const [monthDate, setMonthDate] = useState(firstOfMonth(new Date()));
+  const [monthDate, setMonthDate] = useState(new Date());
   const [search, setSearch] = useState("");
   const [keeperFilter, setKeeperFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [viewMode, setViewMode] = useState("day"); // "day", "bookkeeper", or "table"
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [viewMode, setViewMode] = useState("day");
+  const [loadingData, setLoadingData] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userData, setUserData] = useState(null);
-  const [loading_data, setLoadingData] = useState(true);
   const [migrating, setMigrating] = useState(false);
   const [migrationMessage, setMigrationMessage] = useState('');
 
-  const mKey = monthKey(monthDate);
+  const mKey = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
 
-  // Fetch functions for explicit data refresh (like other dashboards)
   const fetchClosingClients = async () => {
     try {
-      console.log('Fetching closing clients from Firestore (user-filtered)...');
+      console.log('Fetching closing clients from Firestore...');
       const clientsRef = collection(db, "closingClients");
       const clientsQuery = query(clientsRef, where('createdBy', '==', user.uid));
       const snap = await getDocs(clientsQuery);
-      const clients = snap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      console.log('Fetched closing clients:', clients);
-      setClients(clients);
-      return clients;
+      const clientsData = [];
+      snap.docs.forEach(doc => {
+        console.log('Client document:', doc.id, doc.data());
+        clientsData.push({ id: doc.id, ...doc.data() });
+      });
+      console.log('Fetched closing clients:', clientsData);
+      setClients(clientsData);
+      return clientsData;
     } catch (error) {
       console.error('Failed to fetch closing clients:', error);
       return [];
@@ -857,10 +784,11 @@ export default function ClosingDashboard() {
         return { ...prev, [clientId]: cur };
       });
       
-      // Real-time listeners will automatically update the status data
+      // Explicit data refresh like other dashboards
+      fetchClosingStatus();
     } catch (error) {
       console.error('Failed to update status:', error);
-      showToast('Failed to update status. Please try again.', 'error');
+      alert('Failed to update status. Please try again.');
     }
   };
 
@@ -885,38 +813,26 @@ export default function ClosingDashboard() {
       }
       setModalOpen(false);
       setEditing(null);
+      showToast(editing ? 'Client updated successfully!' : 'Client added successfully!', 'success');
       
-      // Debug logging for alert issue
-      console.log('About to show alert for client save...');
-      console.log('Editing mode:', editing);
-      
-      const alertMessage = editing ? "Client updated!" : "Client added!";
-      console.log('Toast message:', alertMessage);
-      
-      showToast(alertMessage, 'success');
-      console.log('Toast should have been displayed');
-      
-      // Real-time listeners will automatically update the data
+      // Explicit data refresh like other dashboards
+      fetchClosingClients();
     } catch (error) {
       console.error('Failed to save client:', error);
-      showToast('Failed to save client. Please try again.', 'error');
+      showToast('Error saving client: ' + error.message, 'error');
     }
   };
 
   const onDeleteClient = async (client) => {
-    if (!window.confirm(`Delete "${client.name}"?`)) return;
-    try {
-      await deleteClosingClient(client.id);
-      
-      // Debug logging for toast notification
-      console.log('About to show delete toast...');
-      showToast('Client deleted!', 'success');
-      console.log('Delete toast should have been displayed');
-      
-      // Real-time listeners will automatically update the data
-    } catch (error) {
-      console.error('Failed to delete client:', error);
-      showToast('Failed to delete client. Please try again.', 'error');
+    if (window.confirm(`Are you sure you want to delete ${client.name}?`)) {
+      try {
+        await deleteClosingClient(client.id);
+        showToast('Client deleted successfully!', 'success');
+        fetchClosingClients();
+      } catch (error) {
+        console.error('Failed to delete client:', error);
+        showToast('Error deleting client: ' + error.message, 'error');
+      }
     }
   };
 
@@ -964,7 +880,6 @@ export default function ClosingDashboard() {
         userEmail={`${user?.email} | Role: ${userData?.role || 'Loading...'} | Admin: ${isAdmin ? 'Yes' : 'No'}`} 
       />
       <BottomRightLogo />
-      <ToastContainer />
 
       {/* Controls Row */}
       <div
@@ -1252,6 +1167,8 @@ export default function ClosingDashboard() {
         initial={editing}
         onSave={onSaveClient}
       />
+
+      <ToastContainer />
     </div>
   );
 }
@@ -1303,31 +1220,34 @@ const DayView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, onEdit, 
           })}
           </Column>
           {index < DAY_BUCKETS.length - 1 && (
-            <div style={{ width: 3, background: "linear-gradient(to bottom, #15803d, #22c55e)", margin: "0 12px", flexShrink: 0, borderRadius: 2, boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }} />
+            <div style={{ width: 1, background: "#e5e7eb", margin: "0 8px" }} />
           )}
         </React.Fragment>
       ))}
       
       {byBucket.other.length > 0 && (
-        <Column title="Other Days">
-          {byBucket.other.map((client) => {
-            const status = statusMap[client.id]?.[mKey] || "PENDING";
-            const dueDate = getDueDate(monthDate, client.closingDay);
-            return (
-              <ClientCard
-                key={client.id}
-                client={client}
-                status={status}
-                dueDate={dueDate}
-                onToggleStatus={onToggleStatus}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                onFilterBookkeeper={onFilterBookkeeper}
-                isAdmin={isAdmin}
-              />
-            );
-          })}
-        </Column>
+        <>
+          <div style={{ width: 1, background: "#e5e7eb", margin: "0 8px" }} />
+          <Column title="Other Days">
+            {byBucket.other.map((client) => {
+              const status = statusMap[client.id]?.[mKey] || "PENDING";
+              const dueDate = getDueDate(monthDate, client.closingDay);
+              return (
+                <ClientCard
+                  key={client.id}
+                  client={client}
+                  status={status}
+                  dueDate={dueDate}
+                  onToggleStatus={onToggleStatus}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onFilterBookkeeper={onFilterBookkeeper}
+                  isAdmin={isAdmin}
+                />
+              );
+            })}
+          </Column>
+        </>
       )}
     </div>
   );
@@ -1338,20 +1258,16 @@ const BookkeeperView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, o
   const byBookkeeper = useMemo(() => {
     const map = new Map();
     
-    for (const keeper of BOOKKEEPERS) {
-      map.set(keeper, []);
-    }
+    for (const keeper of BOOKKEEPERS) map.set(keeper, []);
     
     for (const c of clients) {
       const arr = map.get(c.bookkeeper) || [];
       arr.push(c);
-      if (!map.has(c.bookkeeper)) {
-        map.set(c.bookkeeper, arr);
-      }
+      if (!map.has(c.bookkeeper)) map.set(c.bookkeeper, arr);
     }
     
-    // Sort by closing day within each bookkeeper
-    for (const [keeper, arr] of map.entries()) {
+    // Sort inside each bookkeeper group by closing day, then name
+    for (const [k, arr] of map.entries()) {
       arr.sort((a, b) => a.closingDay - b.closingDay || a.name.localeCompare(b.name));
     }
     
@@ -1359,262 +1275,182 @@ const BookkeeperView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, o
   }, [clients]);
 
   return (
-    <div style={{ display: "grid", gap: 24 }}>
-      {BOOKKEEPERS.map((keeper, index) => {
-        const keeperClients = byBookkeeper.get(keeper) || [];
-        if (keeperClients.length === 0) return null;
-        
-        return (
-          <React.Fragment key={keeper}>
-            <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "#1f2937" }}>
-                {keeper} ({keeperClients.length} clients)
-              </h3>
-              <button
-                onClick={() => onFilterBookkeeper(keeper)}
-                style={{
-                  ...btnSecondary,
-                  padding: "4px 8px",
-                  fontSize: 12,
-                }}
-              >
-                Filter {keeper} only
-              </button>
-            </div>
-            
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
-              {keeperClients.map((client) => {
-                const status = statusMap[client.id]?.[mKey] || "PENDING";
-                const dueDate = getDueDate(monthDate, client.closingDay);
-                return (
-                  <ClientCard
-                    key={client.id}
-                    client={client}
-                    status={status}
-                    dueDate={dueDate}
-                    onToggleStatus={onToggleStatus}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onFilterBookkeeper={onFilterBookkeeper}
-                    isAdmin={isAdmin}
-                  />
-                );
-              })}
-            </div>
-            </div>
-            {index < BOOKKEEPERS.filter(k => (byBookkeeper.get(k) || []).length > 0).length - 1 && (
-              <div style={{ 
-                height: 4, 
-                background: "linear-gradient(to right, #15803d, #22c55e)", 
-                margin: "24px 0", 
-                borderRadius: 2, 
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)" 
-              }} />
-            )}
-          </React.Fragment>
-        );
-      })}
+    <div style={{ display: "flex", overflowX: "auto", gap: 16, paddingBottom: 16 }}>
+      {BOOKKEEPERS.map((keeper, index) => (
+        <React.Fragment key={keeper}>
+          <Column title={keeper}>
+            {(byBookkeeper.get(keeper) || []).map((client) => {
+              const status = statusMap[client.id]?.[mKey] || "PENDING";
+              const dueDate = getDueDate(monthDate, client.closingDay);
+              return (
+                <ClientCard
+                  key={client.id}
+                  client={client}
+                  status={status}
+                  dueDate={dueDate}
+                  onToggleStatus={onToggleStatus}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onFilterBookkeeper={onFilterBookkeeper}
+                  isAdmin={isAdmin}
+                />
+              );
+            })}
+          </Column>
+          {index < BOOKKEEPERS.length - 1 && (
+            <div style={{ width: 1, background: "#e5e7eb", margin: "0 8px" }} />
+          )}
+        </React.Fragment>
+      ))}
     </div>
   );
 };
 
 // Table View Component
 const TableView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, onEdit, onDelete, onFilterBookkeeper, isAdmin }) => {
-  const [comments, setComments] = useState({});
-  const [loadingComments, setLoadingComments] = useState(true);
-
-  // Load comments from Firestore on component mount
-  useEffect(() => {
-    const loadComments = async () => {
-      try {
-        const commentsData = await loadClosingComments();
-        setComments(commentsData);
-      } catch (error) {
-        console.error('Failed to load comments:', error);
-      } finally {
-        setLoadingComments(false);
+  const sortedClients = useMemo(() => {
+    return [...clients].sort((a, b) => {
+      // Sort by closing day first, then by name
+      if (a.closingDay !== b.closingDay) {
+        return a.closingDay - b.closingDay;
       }
-    };
-    loadComments();
-  }, []);
-
-  const updateComment = async (clientId, comment) => {
-    try {
-      // Update local state immediately for better UX
-      const newComments = { ...comments, [clientId]: comment };
-      setComments(newComments);
-      
-      // Save to Firestore
-      await saveClosingComment(clientId, comment);
-    } catch (error) {
-      console.error('Failed to save comment:', error);
-      // Revert local state on error
-      setComments(comments);
-    }
-  };
-
-  const StatusIcon = ({ status }) => {
-    if (status === "VERIFIED_CLOSED") {
-      return (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M9 12l2 2 4-4" stroke="#15803d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-          <circle cx="12" cy="12" r="10" stroke="#15803d" strokeWidth="2"/>
-        </svg>
-      );
-    }
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-        <path d="M12 6v6l4 2" stroke="#ea580c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        <circle cx="12" cy="12" r="10" stroke="#ea580c" strokeWidth="2"/>
-      </svg>
-    );
-  };
+      return a.name.localeCompare(b.name);
+    });
+  }, [clients]);
 
   return (
-    <Card style={{ padding: 0, overflow: "hidden" }}>
+    <Card style={{ overflow: "hidden" }}>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ background: "#15803d", borderBottom: "1px solid #e5e7eb" }}>
-              <th style={{ padding: "12px", textAlign: "left", fontWeight: 600, fontSize: 14, color: "#fff" }}>Client Name</th>
-              <th style={{ padding: "12px", textAlign: "left", fontWeight: 600, fontSize: 14, color: "#fff" }}>Bookkeeper</th>
-              <th style={{ padding: "12px", textAlign: "center", fontWeight: 600, fontSize: 14, color: "#fff" }}>Day</th>
-              <th style={{ padding: "12px", textAlign: "center", fontWeight: 600, fontSize: 14, color: "#fff" }}>Status</th>
-              <th style={{ padding: "12px", textAlign: "left", fontWeight: 600, fontSize: 14, color: "#fff" }}>Due Date</th>
-              <th style={{ padding: "12px", textAlign: "left", fontWeight: 600, fontSize: 14, color: "#fff" }}>Comments</th>
-              <th style={{ padding: "12px", textAlign: "center", fontWeight: 600, fontSize: 14, color: "#fff" }}>Actions</th>
+            <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Client Name
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Closing Day
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Due Date
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Bookkeeper
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Status
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Notes
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
-            {clients.map((client) => {
+            {sortedClients.map((client, index) => {
               const status = statusMap[client.id]?.[mKey] || "PENDING";
               const dueDate = getDueDate(monthDate, client.closingDay);
               const isVerified = status === "VERIFIED_CLOSED";
               const overdue = isOverdue(dueDate);
               const dueSoon = isDueSoon(dueDate);
-              const isClosed = status === "VERIFIED_CLOSED";
               
+              const getStatusColor = () => {
+                if (isVerified) return "green";
+                if (overdue) return "red";
+                if (dueSoon) return "orange";
+                return "gray";
+              };
+
+              const getStatusText = () => {
+                if (isVerified) return "Verified & Closed";
+                if (overdue) return "Overdue";
+                if (dueSoon) return "Due Soon";
+                return "Pending";
+              };
+
               return (
-                <tr key={client.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                  <td style={{ padding: "12px", fontWeight: 500 }}>{client.name}</td>
-                  <td style={{ padding: "12px" }}>
-                    <button
+                <tr 
+                  key={client.id}
+                  style={{ 
+                    borderBottom: "1px solid #f3f4f6",
+                    background: index % 2 === 0 ? "#fff" : "#f9fafb"
+                  }}
+                >
+                  <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 500, color: "#1f2937" }}>
+                    {client.name}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, color: "#6b7280" }}>
+                    {client.closingDay}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center", fontSize: 14, color: "#6b7280" }}>
+                    {dueDate.toLocaleDateString()}
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <Pill 
+                      color="purple"
+                      style={{ cursor: "pointer" }}
                       onClick={() => onFilterBookkeeper(client.bookkeeper)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "#6b7280",
-                        cursor: "pointer",
-                        textDecoration: "underline",
-                        fontSize: 14,
-                      }}
                     >
                       {client.bookkeeper}
-                    </button>
+                    </Pill>
                   </td>
-                  <td style={{ padding: "12px", textAlign: "center" }}>
-                    <div
-                      style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: "50%",
-                        background: "#15803d",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 14,
-                        fontWeight: 600,
-                        margin: "0 auto",
-                      }}
-                    >
-                      {client.closingDay}
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <Pill color={getStatusColor()}>
+                      {getStatusText()}
+                    </Pill>
+                  </td>
+                  <td style={{ padding: "12px 16px", fontSize: 13, color: "#6b7280", maxWidth: 200 }}>
+                    <div style={{ 
+                      overflow: "hidden", 
+                      textOverflow: "ellipsis", 
+                      whiteSpace: "nowrap",
+                      fontStyle: client.notes ? "italic" : "normal"
+                    }}>
+                      {client.notes || "—"}
                     </div>
                   </td>
-                  <td style={{ padding: "12px", textAlign: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                      <Pill color={isVerified ? "green" : "orange"}>
-                        {isVerified ? "CLOSED" : "PENDING"}
-                      </Pill>
-                      <StatusIcon status={status} />
-                    </div>
-                  </td>
-                  <td style={{ padding: "12px" }}>
-                    <div style={{ fontSize: 14 }}>
-                      {dueDate.toLocaleDateString()}
-                      {!isVerified && overdue && (
-                        <div style={{ color: "#FF6347", fontSize: 12, marginTop: 2 }}>⚠︎ Overdue</div>
-                      )}
-                      {!isVerified && dueSoon && !overdue && (
-                        <div style={{ color: "#FF6347", fontSize: 12, marginTop: 2 }}>⚠︎ Due in {Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24))} days</div>
-                      )}
-                    </div>
-                  </td>
-                  <td style={{ padding: "12px" }}>
-                    <textarea
-                      value={comments[client.id] || ''}
-                      onChange={(e) => updateComment(client.id, e.target.value)}
-                      disabled={isClosed}
-                      placeholder={isClosed ? "Comments locked (status is CLOSED)" : "Add comments..."}
-                      style={{
-                        width: "200px",
-                        minHeight: "60px",
-                        padding: "8px",
-                        border: "1px solid #e5e7eb",
-                        borderRadius: 4,
-                        fontSize: 12,
-                        resize: "vertical",
-                        background: isClosed ? "#f9fafb" : "#fff",
-                        color: isClosed ? "#6b7280" : "#1f2937",
-                        cursor: isClosed ? "not-allowed" : "text",
-                      }}
-                    />
-                  </td>
-                  <td style={{ padding: "12px", textAlign: "center" }}>
-                    <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                      {(!isVerified || isAdmin) && (
-                         <button
-                           onClick={() => onToggleStatus(client)}
-                           style={{
-                             padding: "6px 12px",
-                             borderRadius: 4,
-                             border: "none",
-                             background: isVerified ? "#fef3c7" : "#15803d",
-                             color: isVerified ? "#92400e" : "#fff",
-                             cursor: "pointer",
-                             fontSize: 12,
-                             fontWeight: 500,
-                           }}
-                         >
-                           {isVerified ? "Pending" : "Verify"}
-                         </button>
-                       )}
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "center", alignItems: "center" }}>
+                      <button
+                        onClick={() => onToggleStatus(client)}
+                        style={{
+                          ...btnSecondary,
+                          background: isVerified ? "#dcfce7" : "#fff",
+                          color: isVerified ? "#15803d" : "#374151",
+                          border: `1px solid ${isVerified ? "#bbf7d0" : "#e5e7eb"}`,
+                          fontSize: 12,
+                          padding: "4px 8px",
+                        }}
+                      >
+                        {isVerified ? "✓" : "○"}
+                      </button>
+                      
                       {isAdmin && (
-                        <button
-                          onClick={() => onEdit(client)}
-                          style={{
-                            ...btnSecondary,
-                            padding: "6px 12px",
-                            fontSize: 12,
-                          }}
-                        >
-                          Edit
-                        </button>
-                      )}
-                      {isAdmin && (
-                        <button
-                          onClick={() => onDelete(client)}
-                          style={{
-                            ...btnSecondary,
-                            padding: "6px 12px",
-                            fontSize: 12,
-                            color: "#FF6347",
-                            borderColor: "#fca5a5",
-                          }}
-                        >
-                          Delete
-                        </button>
+                        <>
+                          <button
+                            onClick={() => onEdit(client)}
+                            style={{
+                              ...btnSecondary,
+                              fontSize: 12,
+                              padding: "4px 8px",
+                            }}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => onDelete(client)}
+                            style={{
+                              ...btnSecondary,
+                              color: "#dc2626",
+                              border: "1px solid #fca5a5",
+                              fontSize: 12,
+                              padding: "4px 8px",
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -1624,7 +1460,12 @@ const TableView = ({ clients, statusMap, monthDate, mKey, onToggleStatus, onEdit
           </tbody>
         </table>
       </div>
+      
+      {sortedClients.length === 0 && (
+        <div style={{ padding: "40px", textAlign: "center", color: "#6b7280" }}>
+          <p>No clients found matching your filters.</p>
+        </div>
+      )}
     </Card>
   );
-}/ /   F o r c e   d e p l o y m e n t   t r i g g e r  
- 
+}
