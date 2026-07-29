@@ -3,13 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth, db } from "./dynamic-firebase-config";
 import { signOut, createUserWithEmailAndPassword } from "firebase/auth";
-import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc, getDoc } from "firebase/firestore";
+import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc, getDoc, query, where, limit } from "firebase/firestore";
 import Logo from "./components/Logo";
 
 const AddUser = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("accountant");
+  const [jobTitle, setJobTitle] = useState("Accountant");
   const [permissions, setPermissions] = useState({
     vatTracker: false,
     licenseTracker: false,
@@ -23,6 +24,9 @@ const AddUser = () => {
   const [loading, setLoading] = useState(false);
   const [user, authLoading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [accessError, setAccessError] = useState("");
   const navigate = useNavigate();
 
   // Redirect to login if not authenticated
@@ -32,30 +36,76 @@ const AddUser = () => {
     }
   }, [user, authLoading, navigate]);
 
+  const findCurrentUserProfile = async (currentUser) => {
+    const directRef = doc(db, "users", currentUser.uid);
+    const directSnap = await getDoc(directRef);
+    if (directSnap.exists()) {
+      return {
+        id: directSnap.id,
+        ...directSnap.data()
+      };
+    }
+
+    const byUidSnapshot = await getDocs(query(collection(db, "users"), where("uid", "==", currentUser.uid), limit(1)));
+    if (!byUidSnapshot.empty) {
+      const match = byUidSnapshot.docs[0];
+      return {
+        id: match.id,
+        ...match.data()
+      };
+    }
+
+    const byEmailSnapshot = await getDocs(query(collection(db, "users"), where("email", "==", currentUser.email), limit(1)));
+    if (!byEmailSnapshot.empty) {
+      const match = byEmailSnapshot.docs[0];
+      return {
+        id: match.id,
+        ...match.data()
+      };
+    }
+
+    return null;
+  };
+
   // Check if user is admin
   useEffect(() => {
     const checkAdmin = async () => {
       if (user) {
         try {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists() && userSnap.data().role === "admin") {
-            setIsAdmin(true);
-            fetchUsers();
-            fetchClients();
+          setCheckingAccess(true);
+          setAccessError("");
+          const userData = await findCurrentUserProfile(user);
+          if (userData) {
+            const userRole = userData.role;
+            
+            // Set admin status for both admin and superAdmin
+            setIsAdmin(userRole === "admin" || userRole === "superAdmin");
+            
+            // Set super admin status only for superAdmin
+            setIsSuperAdmin(userRole === "superAdmin");
+            
+            // Only super admin can access this page
+            if (userRole === "superAdmin") {
+              fetchUsers();
+              fetchClients();
+            } else {
+              setAccessError("User management is restricted to Super Admin only.");
+            }
           } else {
-            navigate("/app-selector", { replace: true });
+            setAccessError("We could not verify your admin access. Please check your user role record.");
           }
         } catch (error) {
           console.error("Error checking admin status:", error);
-          navigate("/app-selector", { replace: true });
+          setAccessError("We could not verify your admin access right now.");
+        } finally {
+          setCheckingAccess(false);
         }
       }
     };
-    if (!authLoading) {
+    if (user) {
       checkAdmin();
     }
-  }, [user, authLoading, navigate]);
+  }, [user, navigate]);
 
   const fetchUsers = async () => {
     try {
@@ -93,6 +143,7 @@ const AddUser = () => {
         // Update existing user
         await updateDoc(doc(db, "users", editingUser.id), {
           role,
+          jobTitle,
           permissions,
           assignedClients: role === 'accountant' ? assignedClients : []
         });
@@ -106,6 +157,7 @@ const AddUser = () => {
           uid: newUser.uid,
           email: email,
           role: role,
+          jobTitle: jobTitle,
           permissions: permissions,
           assignedClients: role === 'accountant' ? assignedClients : [],
           createdAt: new Date()
@@ -117,6 +169,7 @@ const AddUser = () => {
       setEmail("");
       setPassword("");
       setRole("accountant");
+      setJobTitle("Accountant");
       setPermissions({ vatTracker: false, licenseTracker: false, closingTracker: false });
       setAssignedClients([]);
       setSelectAllClients(false);
@@ -133,6 +186,7 @@ const AddUser = () => {
     setEditingUser(userData);
     setEmail(userData.email);
     setRole(userData.role || "accountant");
+    setJobTitle(userData.jobTitle || "Accountant");
     setPermissions(userData.permissions || { vatTracker: false, licenseTracker: false, closingTracker: false });
     setAssignedClients(userData.assignedClients || []);
   };
@@ -142,6 +196,7 @@ const AddUser = () => {
     setEmail("");
     setPassword("");
     setRole("accountant");
+    setJobTitle("Accountant");
     setPermissions({ vatTracker: false, licenseTracker: false, closingTracker: false });
     setAssignedClients([]);
     setSelectAllClients(false);
@@ -209,10 +264,35 @@ const AddUser = () => {
     navigate("/app-selector");
   };
 
-  if (authLoading || loading) {
+  if (authLoading || loading || checkingAccess) {
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (accessError || !isSuperAdmin) {
+    return (
+      <div style={{ backgroundColor: "#E8F5E8", minHeight: "100vh", padding: "20px" }}>
+        <div style={{ textAlign: "center", marginBottom: "20px" }}>
+          <Logo position="top-right" />
+          <h1 style={{ color: "#15803d" }}>User Management</h1>
+          <p style={{ color: "#666" }}>{user?.email}</p>
+        </div>
+
+        <div style={{ maxWidth: "560px", margin: "80px auto 0", backgroundColor: "white", padding: "24px", borderRadius: "12px", border: "1px solid #D1D5DB", textAlign: "center" }}>
+          <h3 style={{ color: "#B91C1C", marginTop: 0 }}>Access Not Available</h3>
+          <p style={{ color: "#374151", marginBottom: "18px" }}>
+            {accessError || "User management is restricted to Super Admin only."}
+          </p>
+          <button
+            onClick={handleBackToSelector}
+            style={{ backgroundColor: "#666", color: "white", padding: "10px 20px", border: "none", borderRadius: "5px", cursor: "pointer" }}
+          >
+            ← Back to App Selector
+          </button>
+        </div>
       </div>
     );
   }
@@ -274,6 +354,22 @@ const AddUser = () => {
             >
               <option value="accountant">Accountant</option>
               <option value="admin">Admin</option>
+              <option value="executive_assistant">Executive Assistant</option>
+              <option value="financial_controller">Financial Controller</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: "block", marginBottom: "5px", color: "#666" }}>Job Title:</label>
+            <select 
+              value={jobTitle} 
+              onChange={(e) => setJobTitle(e.target.value)}
+              style={{ padding: "10px", border: "1px solid #ccc", borderRadius: "5px", width: "100%" }}
+            >
+              <option value="Accountant">Accountant</option>
+              <option value="Tax Accountant">Tax Accountant</option>
+              <option value="Executive Assistant">Executive Assistant</option>
+              <option value="Financial Controller">Financial Controller</option>
             </select>
           </div>
 
@@ -382,6 +478,7 @@ const AddUser = () => {
                 <tr style={{ backgroundColor: "#15803d", color: "white" }}>
                   <th style={{ padding: "12px", border: "1px solid #ddd", textAlign: "left" }}>Email</th>
                   <th style={{ padding: "12px", border: "1px solid #ddd", textAlign: "left" }}>Role</th>
+                  <th style={{ padding: "12px", border: "1px solid #ddd", textAlign: "left" }}>Job Title</th>
                   <th style={{ padding: "12px", border: "1px solid #ddd", textAlign: "center" }}>VAT</th>
                   <th style={{ padding: "12px", border: "1px solid #ddd", textAlign: "center" }}>License</th>
                   <th style={{ padding: "12px", border: "1px solid #ddd", textAlign: "center" }}>Closing</th>
@@ -403,6 +500,17 @@ const AddUser = () => {
                           fontSize: '12px'
                         }}>
                           {userData.role?.toUpperCase() || 'ACCOUNTANT'}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px", border: "1px solid #ddd" }}>
+                        <span style={{ 
+                          backgroundColor: '#7C3AED',
+                          color: 'white',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          fontSize: '12px'
+                        }}>
+                          {userData.jobTitle || 'Accountant'}
                         </span>
                       </td>
                       <td style={{ padding: "10px", border: "1px solid #ddd", textAlign: "center" }}>
