@@ -341,13 +341,15 @@ const CtDashboard = () => {
                 <td style={{ color: "red" }}>{client.ctDeadline.toLocaleDateString()}</td>
                 <td>{client.status}</td>
                 <td>
-                  <button
-                    onClick={() => handleSubmitCT(client)}
-                    style={{ backgroundColor: "#15803d", color: "white", padding: "5px 10px" }}
-                  >
-                    Submit
-                  </button>
-                  {isAdmin && (
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => handleSubmitCT(client)}
+                      style={{ backgroundColor: "#15803d", color: "white", padding: "5px 10px" }}
+                    >
+                      Submit
+                    </button>
+                  )}
+                  {isSuperAdmin && (
                     <button
                       onClick={() => handleEditClient(client)}
                       style={{
@@ -385,7 +387,7 @@ const CtDashboard = () => {
                 <td>{client.ctDeadline.toLocaleDateString()}</td>
                 <td>{client.status}</td>
                 <td>
-                  {isAdmin && (
+                  {isSuperAdmin && (
                     <button onClick={() => handleEditClient(client)} style={{ padding: "5px 10px" }}>
                       Edit
                     </button>
