@@ -6,6 +6,8 @@ import { doc, getDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import Logo from "./components/Logo";
 
+const SHOW_KPI_REPORTS = false;
+
 const AppSelector = () => {
   const [user, loading] = useAuthState(auth);
   const [userPermissions, setUserPermissions] = useState({});
@@ -220,8 +222,35 @@ const AppSelector = () => {
             </div>
           )}
 
+          {/* Clients' Salaries Payment Tracker - Admin Only */}
+          {isAdmin && (
+            <div style={{
+              backgroundColor: "white",
+              border: "2px solid #0F766E",
+              borderRadius: "10px",
+              padding: "30px",
+              textAlign: "center",
+              cursor: "pointer",
+              transition: "all 0.3s ease",
+              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+            }}
+            onClick={() => handleAppSelection("clients-salaries-payment-traker")}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "#f0fdfa";
+              e.target.style.transform = "translateY(-5px)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "white";
+              e.target.style.transform = "translateY(0)";
+            }}>
+              <div style={{ fontSize: "48px", marginBottom: "15px" }}>💷</div>
+              <h3 style={{ color: "#0F766E", marginBottom: "10px" }}>Clients&apos; Salaries Payment Tracker</h3>
+              <p style={{ color: "#666", fontSize: "14px" }}>Dedicated workspace for salary payment tracking</p>
+            </div>
+          )}
+
           {/* KPI Report Generator - Super Admin Only */}
-          {isSuperAdmin && (
+          {isSuperAdmin && SHOW_KPI_REPORTS && (
             <div style={{
               backgroundColor: "white",
               border: "2px solid #DC2626",
