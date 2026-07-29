@@ -6,6 +6,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from './dynamic-firebase-config';
 import Login from './Login';
 import VatDashboard from './VatDashboard.jsx';
+import CtDashboard from './CtDashboard';
 import AppSelector from './AppSelector';
 import LicenseDashboard from './LicenseDashboard';
 import ClosingDashboard from './closingdashboard.jsx';
@@ -30,6 +31,7 @@ const App = () => {
         <Route path="/app-selector" element={<AppSelector />} />
         <Route path="/dashboard" element={<VatDashboard />} />
         <Route path="/vat-dashboard" element={<VatDashboard />} />
+        <Route path="/ct-dashboard" element={<CtDashboard />} />
         <Route path="/license-dashboard" element={<LicenseDashboard />} />
         <Route path="/closing-dashboard" element={<ClosingDashboard />} />
         <Route path="/unified-client-dashboard" element={<UnifiedClientDashboard />} />

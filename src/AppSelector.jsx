@@ -168,6 +168,33 @@ const AppSelector = () => {
             </div>
           )}
 
+          {/* CT Submission Tracker - Admin Only */}
+          {isAdmin && (
+            <div style={{
+              backgroundColor: "white",
+              border: "2px solid #2563EB",
+              borderRadius: "10px",
+              padding: "30px",
+              textAlign: "center",
+              cursor: "pointer",
+              transition: "all 0.3s ease",
+              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+            }}
+            onClick={() => handleAppSelection("ct-dashboard")}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "#eff6ff";
+              e.target.style.transform = "translateY(-5px)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "white";
+              e.target.style.transform = "translateY(0)";
+            }}>
+              <div style={{ fontSize: "48px", marginBottom: "15px" }}>🏛️</div>
+              <h3 style={{ color: "#2563EB", marginBottom: "10px" }}>CT Submission Tracker</h3>
+              <p style={{ color: "#666", fontSize: "14px" }}>Track annual CT submissions synced from License Tracker</p>
+            </div>
+          )}
+
           {/* Closing Tracker */}
           {(isAdmin || userPermissions.closingTracker) && (
             <div style={{
