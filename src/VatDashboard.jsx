@@ -16,6 +16,7 @@ const VatDashboard = () => {
   const [editingClient, setEditingClient] = useState(null);
   const [user, loading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const navigate = useNavigate();
 
@@ -85,26 +86,35 @@ const fetchClients = async () => {
           if (userSnap.exists()) {
             const data = userSnap.data();
             setUserData(data);
-            if (data.role === "admin") {
-              console.log("User is admin:", user.email);
-              setIsAdmin(true);
+            const userRole = data.role;
+            
+            // Set admin status for both admin and superAdmin
+            setIsAdmin(userRole === "admin" || userRole === "superAdmin");
+            
+            // Set super admin status only for superAdmin
+            setIsSuperAdmin(userRole === "superAdmin");
+            
+            if (userRole === "admin" || userRole === "superAdmin") {
+              console.log("User is admin/superAdmin:", user.email);
             } else {
               console.log("User is not admin:", user.email);
-              setIsAdmin(false);
-              console.log("User role:", data.role);
+              console.log("User role:", userRole);
             }
           } else {
             console.log("User document does not exist");
             setIsAdmin(false);
+            setIsSuperAdmin(false);
             setUserData(null);
           }
         } catch (error) {
           console.error("Error checking user status:", error);
           setIsAdmin(false);
+          setIsSuperAdmin(false);
           setUserData(null);
         }
       } else {
         setIsAdmin(false);
+        setIsSuperAdmin(false);
         setUserData(null);
       }
     };
@@ -405,7 +415,7 @@ const handleEditClient = async (client) => {
               <td>{client.status}</td>
               <td>
                 <button onClick={() => handleSubmitVAT(client)} style={{ backgroundColor: "#15803d", color: "white", padding: "5px 10px" }}>Submit</button>
-                {isAdmin && (
+                {isSuperAdmin && (
                   <>
                     <button onClick={() => handleEditClient(client)}style={{ backgroundColor: "#FFA500", color: "white", padding: "5px 10px", marginLeft: "5px" }}>Edit</button>
                     <button onClick={() => handleDeleteClient(client.id)}style={{ backgroundColor: "grey", color: "white", padding: "5px 10px", marginLeft: "5px" }}>Delete</button>
@@ -441,7 +451,7 @@ const handleEditClient = async (client) => {
               <td>{new Date(client.submissionDeadline.seconds * 1000).toLocaleDateString()}</td>
               <td>{client.status}</td>
               <td>
-                {isAdmin && (
+                {isSuperAdmin && (
                   <>
                     <button onClick={() => handleEditClient(client)}>Edit</button>
                     <button onClick={() => handleDeleteClient(client.id)}>Delete</button>
