@@ -115,6 +115,51 @@ const READ_ONLY_TABLE_CELL_STYLE = {
   fontSize: "14px"
 };
 
+const TABLE_FIELD_STYLE = {
+  width: "100%",
+  height: "36px",
+  minHeight: "36px",
+  padding: "6px 10px",
+  borderRadius: "4px",
+  border: "1px solid #D4AF37",
+  backgroundColor: "#FFFDF0",
+  color: "#111827",
+  fontSize: "14px",
+  lineHeight: 1.4,
+  boxSizing: "border-box",
+  boxShadow: "none"
+};
+
+const CLIENT_COMMENTS_TEXTAREA_STYLE = {
+  width: "100%",
+  minWidth: "320px",
+  maxWidth: "100%",
+  minHeight: "56px",
+  padding: "10px 12px",
+  borderRadius: "4px",
+  border: "1px solid #94A3B8",
+  backgroundColor: "#FFFFFF",
+  color: "#111827",
+  fontSize: "14px",
+  lineHeight: 1.45,
+  resize: "vertical",
+  boxSizing: "border-box"
+};
+
+const getClientCardStyles = (paymentStatus) => {
+  if (paymentStatus === "PAID") {
+    return {
+      backgroundColor: "#DCFCE7",
+      border: "1px solid #15803d"
+    };
+  }
+
+  return {
+    backgroundColor: "#FEF2F2",
+    border: "1px solid #FCA5A5"
+  };
+};
+
 const ClientsSalariesPaymentTraker = () => {
   const [user, loading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -125,6 +170,7 @@ const ClientsSalariesPaymentTraker = () => {
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [savingClientIds, setSavingClientIds] = useState([]);
+  const [savingAllChanges, setSavingAllChanges] = useState(false);
   const [creatingClient, setCreatingClient] = useState(false);
   const [dirtyClientIds, setDirtyClientIds] = useState([]);
   const [employeeToDeactivate, setEmployeeToDeactivate] = useState(null);
@@ -363,7 +409,15 @@ const ClientsSalariesPaymentTraker = () => {
           ? {
               ...client,
               rows: (client.rows || []).map((row) =>
-                row.id === rowId ? { ...row, [field]: normalizedValue } : row
+                row.id === rowId
+                  ? {
+                      ...row,
+                      [field]: normalizedValue,
+                      ...(field === "accPayment" && normalizedValue === true
+                        ? { paymentMethod: "Direct payment" }
+                        : {})
+                    }
+                  : row
               )
             }
           : client
@@ -386,7 +440,7 @@ const ClientsSalariesPaymentTraker = () => {
           rows: useClientPaymentMethod
             ? (client.rows || []).map((row) => ({
                 ...row,
-                paymentMethod: client.clientPaymentMethod || "WPS"
+                paymentMethod: row.accPayment ? "Direct payment" : client.clientPaymentMethod || "WPS"
               }))
             : client.rows || []
         };
@@ -409,7 +463,7 @@ const ClientsSalariesPaymentTraker = () => {
           rows: client.useClientPaymentMethod
             ? (client.rows || []).map((row) => ({
                 ...row,
-                paymentMethod
+                paymentMethod: row.accPayment ? "Direct payment" : paymentMethod
               }))
             : client.rows || []
         };
@@ -522,6 +576,20 @@ const ClientsSalariesPaymentTraker = () => {
     setClientToDelete(null);
   };
 
+  const persistClientChanges = async (client) => {
+    const savedRows = await saveSalaryPaymentClientRows(
+      client.id,
+      client.rows || [],
+      client.useClientPaymentMethod || false,
+      client.clientPaymentMethod || "WPS",
+      client.comments || "",
+      client.clientPaymentStatus || "UNPAID",
+      client.lastPaidCycleKey || ""
+    );
+
+    return { clientId: client.id, clientName: client.clientName, savedRows };
+  };
+
   const handleSaveClient = async (clientId) => {
     clearMessages();
     const selectedClient = clients.find((client) => client.id === clientId);
@@ -531,18 +599,12 @@ const ClientsSalariesPaymentTraker = () => {
     }
 
     try {
-      setSavingClientIds((current) => [...current, clientId]);
-      const savedRows = await saveSalaryPaymentClientRows(
-        clientId,
-        selectedClient.rows || [],
-        selectedClient.useClientPaymentMethod || false,
-        selectedClient.clientPaymentMethod || "WPS",
-        selectedClient.comments || "",
-        selectedClient.clientPaymentStatus || "UNPAID",
-        selectedClient.lastPaidCycleKey || ""
-      );
+      setSavingClientIds((current) => (current.includes(clientId) ? current : [...current, clientId]));
+      const result = await persistClientChanges(selectedClient);
       setClients((current) =>
-        current.map((client) => (client.id === clientId ? { ...client, rows: savedRows } : client))
+        current.map((client) =>
+          client.id === result.clientId ? { ...client, rows: result.savedRows } : client
+        )
       );
       setDirtyClientIds((current) => current.filter((id) => id !== clientId));
       setSuccessMessage(`Saved ${selectedClient.clientName}`);
@@ -554,131 +616,148 @@ const ClientsSalariesPaymentTraker = () => {
     }
   };
 
+  const handleSaveAllChanges = async () => {
+    clearMessages();
+
+    if (dirtyClientIds.length === 0) {
+      setSuccessMessage("No unsaved changes.");
+      return;
+    }
+
+    const clientsToSave = clients.filter((client) => dirtyClientIds.includes(client.id));
+
+    if (clientsToSave.length === 0) {
+      setSuccessMessage("No unsaved changes.");
+      return;
+    }
+
+    try {
+      setSavingAllChanges(true);
+      setSavingClientIds((current) => [...new Set([...current, ...clientsToSave.map((client) => client.id)])]);
+
+      const saveResults = await Promise.all(clientsToSave.map((client) => persistClientChanges(client)));
+      const savedRowsByClientId = new Map(
+        saveResults.map((result) => [result.clientId, result.savedRows])
+      );
+
+      setClients((current) =>
+        current.map((client) =>
+          savedRowsByClientId.has(client.id)
+            ? { ...client, rows: savedRowsByClientId.get(client.id) }
+            : client
+        )
+      );
+      setDirtyClientIds((current) =>
+        current.filter((id) => !savedRowsByClientId.has(id))
+      );
+      setSuccessMessage("All changes saved successfully.");
+    } catch (saveError) {
+      console.error("Error saving all salary client rows:", saveError);
+      setError("Failed to save all changes");
+    } finally {
+      setSavingAllChanges(false);
+      setSavingClientIds((current) =>
+        current.filter((id) => !clientsToSave.some((client) => client.id === id))
+      );
+    }
+  };
+
   const renderClientCard = (client) => {
     const isSaving = savingClientIds.includes(client.id);
     const isDirty = dirtyClientIds.includes(client.id);
     const effectiveClientPaymentStatus = getEffectiveClientPaymentStatus(client, activeSalaryCycleKey);
+    const clientCardStyles = getClientCardStyles(effectiveClientPaymentStatus);
 
     return (
       <div key={client.id} style={{ marginBottom: "28px" }}>
         <div
           style={{
-            backgroundColor: "#DCFCE7",
-            border: "1px solid #15803d",
+            ...clientCardStyles,
             borderRadius: "18px",
             padding: "22px",
             boxShadow: "0 16px 36px rgba(0,0,0,0.24)",
             fontSize: "14px"
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "16px", flexWrap: "wrap", marginBottom: "18px", alignItems: "flex-start" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "20px", flexWrap: "wrap", marginBottom: "18px", alignItems: "flex-start" }}>
             <div
               style={{
-                padding: "16px 18px"
+                padding: "8px 0",
+                flex: "1 1 280px"
               }}
             >
               <h2 style={{ color: "#111827", margin: 0, fontSize: "24px", fontWeight: 800 }}>{client.clientName}</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+                <span style={{ color: "#111827", fontSize: "14px", fontWeight: 700, whiteSpace: "nowrap" }}>Client Status</span>
+                <select
+                  value={effectiveClientPaymentStatus}
+                  onChange={(event) => handleClientPaymentStatusChange(client.id, event.target.value)}
+                  style={{
+                    minWidth: "140px",
+                    padding: "8px 12px",
+                    borderRadius: "10px",
+                    fontWeight: "bold",
+                    fontSize: "14px",
+                    ...getClientPaymentStatusStyles(effectiveClientPaymentStatus)
+                  }}
+                >
+                  {CLIENT_PAYMENT_STATUS_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <button
-                onClick={() => handleAddLine(client.id)}
-                style={{
-                  backgroundColor: "#2563EB",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "10px",
-                  padding: "10px 14px",
-                  fontWeight: "bold",
-                  fontSize: "14px",
-                  cursor: "pointer"
-                }}
-              >
-                + Add Line
-              </button>
-              <button
-                onClick={() => handleSaveClient(client.id)}
-                disabled={!isDirty || isSaving}
-                style={{
-                  backgroundColor: "#475569",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "10px",
-                  padding: "10px 14px",
-                  fontWeight: "bold",
-                  fontSize: "14px",
-                  cursor: !isDirty || isSaving ? "not-allowed" : "pointer"
-                }}
-              >
-                {isSaving ? "Saving..." : "Save Table"}
-              </button>
-              <button
-                onClick={() => handleRequestDeleteClient(client)}
-                style={{
-                  backgroundColor: "#B91C1C",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "10px",
-                  padding: "10px 14px",
-                  fontWeight: "bold",
-                  fontSize: "14px",
-                  cursor: "pointer"
-                }}
-              >
-                Delete Client
-              </button>
-            </div>
-          </div>
+            <div style={{ flex: "1 1 560px", minWidth: "340px", maxWidth: "760px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", alignItems: "stretch" }}>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button
+                    onClick={() => handleSaveClient(client.id)}
+                    disabled={!isDirty || isSaving}
+                    style={{
+                      backgroundColor: "#475569",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "10px",
+                      padding: "10px 14px",
+                      fontWeight: "bold",
+                      fontSize: "14px",
+                      cursor: !isDirty || isSaving ? "not-allowed" : "pointer"
+                    }}
+                  >
+                    {isSaving ? "Saving..." : "Save Table"}
+                  </button>
+                  <button
+                    onClick={() => handleRequestDeleteClient(client)}
+                    style={{
+                      backgroundColor: "#B91C1C",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "10px",
+                      padding: "10px 14px",
+                      fontWeight: "bold",
+                      fontSize: "14px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Delete Client
+                  </button>
+                </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "16px",
-              marginBottom: "18px",
-              padding: "0 18px",
-              flexWrap: "wrap"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-              <span style={{ color: "#111827", fontSize: "14px", fontWeight: 700 }}>Client Status</span>
-              <select
-                value={effectiveClientPaymentStatus}
-                onChange={(event) => handleClientPaymentStatusChange(client.id, event.target.value)}
-                style={{
-                  minWidth: "140px",
-                  padding: "8px 12px",
-                  borderRadius: "10px",
-                  fontWeight: "bold",
-                  fontSize: "14px",
-                  ...getClientPaymentStatusStyles(effectiveClientPaymentStatus)
-                }}
-              >
-                {CLIENT_PAYMENT_STATUS_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", justifyContent: "flex-end", whiteSpace: "nowrap", flex: "1 1 420px" }}>
-              <span style={{ color: "#111827", fontSize: "14px", fontWeight: 700 }}>Comments</span>
-              <input
-                type="text"
-                value={client.comments || ""}
-                onChange={(event) => handleClientCommentsChange(client.id, event.target.value)}
-                placeholder="Enter comments"
-                style={{
-                  width: "320px",
-                  maxWidth: "100%",
-                  padding: "10px 12px",
-                  borderRadius: "10px",
-                  border: "1px solid #15803d",
-                  backgroundColor: "#F0FFF4",
-                  color: "#111827",
-                  fontSize: "14px"
-                }}
-              />
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "flex-start", gap: "18px", width: "100%" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "90px minmax(0, 1fr)", gap: "10px", alignItems: "start", flex: "1 1 620px", maxWidth: "860px", marginLeft: "auto" }}>
+                    <span style={{ color: "#111827", fontSize: "14px", fontWeight: 700, paddingTop: "8px", justifySelf: "end" }}>Comments</span>
+                    <textarea
+                      value={client.comments || ""}
+                      onChange={(event) => handleClientCommentsChange(client.id, event.target.value)}
+                      placeholder="Enter comments"
+                      rows={2}
+                      style={CLIENT_COMMENTS_TEXTAREA_STYLE}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -690,7 +769,7 @@ const ClientsSalariesPaymentTraker = () => {
               alignItems: "center",
               marginBottom: "18px",
               padding: "14px 16px",
-              backgroundColor: "#BBF7D0",
+              backgroundColor: "transparent",
               border: "1px solid #15803d",
               borderRadius: "14px"
             }}
@@ -756,7 +835,24 @@ const ClientsSalariesPaymentTraker = () => {
                 {(client.rows || []).length === 0 ? (
                   <tr>
                     <td colSpan="8" style={{ color: "#111827", padding: "18px 10px", backgroundColor: "#DCFCE7", fontSize: "14px" }}>
-                      No lines yet. Click `Add Line` to create the first manual row.
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
+                        <span>No lines yet.</span>
+                        <button
+                          onClick={() => handleAddLine(client.id)}
+                          style={{
+                            backgroundColor: "#2563EB",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "8px",
+                            padding: "8px 14px",
+                            fontWeight: "bold",
+                            fontSize: "14px",
+                            cursor: "pointer"
+                          }}
+                        >
+                          + Add Line
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -768,30 +864,14 @@ const ClientsSalariesPaymentTraker = () => {
                           value={row.employeeName}
                           onChange={(event) => handleRowChange(client.id, row.id, "employeeName", event.target.value)}
                           placeholder="Employee name"
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "10px",
-                            border: "1px solid #D4AF37",
-                            backgroundColor: "#FFFDF0",
-                            color: "#111827",
-                            fontSize: "14px"
-                          }}
+                          style={TABLE_FIELD_STYLE}
                         />
                       </td>
                       <td style={{ padding: "10px", borderBottom: "1px solid #D4AF37", backgroundColor: "#FFF8DC" }}>
                         <select
                           value={row.currency}
                           onChange={(event) => handleRowChange(client.id, row.id, "currency", event.target.value)}
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "10px",
-                            border: "1px solid #D4AF37",
-                            backgroundColor: "#FFFDF0",
-                            color: "#111827",
-                            fontSize: "14px"
-                          }}
+                          style={TABLE_FIELD_STYLE}
                         >
                           <option value="AED">AED</option>
                           <option value="USD">USD</option>
@@ -822,30 +902,19 @@ const ClientsSalariesPaymentTraker = () => {
                           placeholder="0"
                           inputMode="numeric"
                           pattern="[0-9]*"
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "10px",
-                            border: "1px solid #D4AF37",
-                            backgroundColor: "#FFFDF0",
-                            color: "#111827",
-                            fontSize: "14px"
-                          }}
+                          style={TABLE_FIELD_STYLE}
                         />
                       </td>
                       <td style={{ padding: "10px", borderBottom: "1px solid #D4AF37", backgroundColor: "#FFF8DC" }}>
                         <select
                           value={row.paymentMethod}
                           onChange={(event) => handleRowChange(client.id, row.id, "paymentMethod", event.target.value)}
-                          disabled={client.useClientPaymentMethod}
+                          disabled={client.useClientPaymentMethod || row.accPayment}
                           style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "10px",
-                            fontSize: "14px",
+                            ...TABLE_FIELD_STYLE,
                             ...getPaymentMethodStyles(row.paymentMethod),
-                            cursor: client.useClientPaymentMethod ? "not-allowed" : "pointer",
-                            opacity: client.useClientPaymentMethod ? 0.65 : 1
+                            cursor: client.useClientPaymentMethod || row.accPayment ? "not-allowed" : "pointer",
+                            opacity: client.useClientPaymentMethod || row.accPayment ? 0.65 : 1
                           }}
                         >
                           {PAYMENT_METHOD_OPTIONS.map((option) => (
@@ -859,15 +928,7 @@ const ClientsSalariesPaymentTraker = () => {
                         <select
                           value={row.status}
                           onChange={(event) => handleStatusChange(client.id, row, event.target.value)}
-                          style={{
-                            width: "100%",
-                            padding: "10px 12px",
-                            borderRadius: "10px",
-                            border: "1px solid #D4AF37",
-                            backgroundColor: "#FFFDF0",
-                            color: "#111827",
-                            fontSize: "14px"
-                          }}
+                          style={TABLE_FIELD_STYLE}
                         >
                           <option value="Active">Active</option>
                           <option value="Pending">Pending</option>
@@ -875,21 +936,40 @@ const ClientsSalariesPaymentTraker = () => {
                         </select>
                       </td>
                       <td style={{ padding: "10px", borderBottom: "1px solid #D4AF37", backgroundColor: "#FFF8DC" }}>
-                        <button
-                          onClick={() => handleDeleteLine(client.id, row.id)}
-                          style={{
-                            backgroundColor: "#7F1D1D",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "10px",
-                            padding: "10px 12px",
-                            cursor: "pointer",
-                            fontWeight: "bold",
-                            fontSize: "14px"
-                          }}
-                        >
-                          Delete
-                        </button>
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <button
+                            onClick={() => handleAddLine(client.id)}
+                            style={{
+                              backgroundColor: "#2563EB",
+                              color: "white",
+                              border: "none",
+                              borderRadius: "8px",
+                              padding: "8px 10px",
+                              cursor: "pointer",
+                              fontWeight: "bold",
+                              fontSize: "13px",
+                              minWidth: "58px"
+                            }}
+                          >
+                            + Add
+                          </button>
+                          <button
+                            onClick={() => handleDeleteLine(client.id, row.id)}
+                            style={{
+                              backgroundColor: "#7F1D1D",
+                              color: "white",
+                              border: "none",
+                              borderRadius: "8px",
+                              padding: "8px 10px",
+                              cursor: "pointer",
+                              fontWeight: "bold",
+                              fontSize: "13px",
+                              minWidth: "60px"
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                       <td style={{ padding: "10px", borderBottom: "1px solid #D4AF37", backgroundColor: "#FFF8DC" }}>
                         <input
@@ -898,14 +978,8 @@ const ClientsSalariesPaymentTraker = () => {
                           onChange={(event) => handleRowChange(client.id, row.id, "comments", event.target.value)}
                           placeholder="Comments"
                           style={{
-                            width: "100%",
+                            ...TABLE_FIELD_STYLE,
                             minWidth: "180px",
-                            padding: "10px 12px",
-                            borderRadius: "10px",
-                            border: "1px solid #D4AF37",
-                            backgroundColor: "#FFFDF0",
-                            color: "#111827",
-                            fontSize: "14px"
                           }}
                         />
                       </td>
@@ -992,15 +1066,15 @@ const ClientsSalariesPaymentTraker = () => {
             boxShadow: "0 12px 30px rgba(0,0,0,0.28)"
           }}
         >
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "nowrap", alignItems: "stretch" }}>
             <input
               type="text"
               value={newClientName}
               onChange={(event) => setNewClientName(event.target.value)}
               placeholder="Enter client name"
               style={{
-                flex: "1 1 320px",
-                minWidth: "260px",
+                flex: "1 1 auto",
+                minWidth: 0,
                 padding: "14px 16px",
                 borderRadius: "12px",
                 border: "1px solid #374151",
@@ -1020,7 +1094,9 @@ const ClientsSalariesPaymentTraker = () => {
                 padding: "14px 18px",
                 fontWeight: "bold",
                 fontSize: "14px",
-                cursor: creatingClient ? "not-allowed" : "pointer"
+                cursor: creatingClient ? "not-allowed" : "pointer",
+                minWidth: "190px",
+                flex: "0 0 auto"
               }}
             >
               {creatingClient ? "Adding..." : "Add Client"}
@@ -1030,51 +1106,73 @@ const ClientsSalariesPaymentTraker = () => {
           {error && <p style={{ color: "#FCA5A5", margin: "12px 0 0 0" }}>{error}</p>}
           {successMessage && <p style={{ color: "#86EFAC", margin: "12px 0 0 0" }}>{successMessage}</p>}
 
-          <div style={{ display: "flex", background: "#e2e8f0", borderRadius: 8, padding: 3, marginTop: "14px", width: "fit-content" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", alignItems: "center", marginTop: "14px" }}>
+            <div style={{ display: "flex", background: "#e2e8f0", borderRadius: 8, padding: 3, width: "fit-content" }}>
+              <button
+                onClick={() => setViewMode("clients")}
+                style={{
+                  padding: "6px 12px",
+                  border: "none",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  background: viewMode === "clients" ? "#15803d" : "transparent",
+                  color: viewMode === "clients" ? "#fff" : "#475569",
+                  fontWeight: viewMode === "clients" ? 500 : 400
+                }}
+              >
+                Clients' Salaries Payments
+              </button>
+              <button
+                onClick={() => setViewMode("access")}
+                style={{
+                  padding: "6px 12px",
+                  border: "none",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  background: viewMode === "access" ? "#15803d" : "transparent",
+                  color: viewMode === "access" ? "#fff" : "#475569",
+                  fontWeight: viewMode === "access" ? 500 : 400
+                }}
+              >
+                ACCESS Payments
+              </button>
+              <button
+                onClick={() => setViewMode("summary")}
+                style={{
+                  padding: "6px 12px",
+                  border: "none",
+                  borderRadius: 4,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  background: viewMode === "summary" ? "#15803d" : "transparent",
+                  color: viewMode === "summary" ? "#fff" : "#475569",
+                  fontWeight: viewMode === "summary" ? 500 : 400
+                }}
+              >
+                Summary of Unpaid Clients
+              </button>
+            </div>
             <button
-              onClick={() => setViewMode("clients")}
+              onClick={handleSaveAllChanges}
+              disabled={savingAllChanges || dirtyClientIds.length === 0}
               style={{
-                padding: "6px 12px",
+                backgroundColor: savingAllChanges || dirtyClientIds.length === 0 ? "#475569" : "#15803d",
+                color: "white",
                 border: "none",
-                borderRadius: 4,
-                fontSize: 14,
-                cursor: "pointer",
-                background: viewMode === "clients" ? "#15803d" : "transparent",
-                color: viewMode === "clients" ? "#fff" : "#475569",
-                fontWeight: viewMode === "clients" ? 500 : 400
+                borderRadius: "12px",
+                padding: "14px 22px",
+                fontWeight: "bold",
+                fontSize: "15px",
+                letterSpacing: "0.2px",
+                cursor: savingAllChanges || dirtyClientIds.length === 0 ? "not-allowed" : "pointer",
+                boxShadow: "0 10px 20px rgba(21,128,61,0.22)",
+                minWidth: "220px",
+                flex: "0 0 auto"
               }}
             >
-              Clients' Salaries Payments
-            </button>
-            <button
-              onClick={() => setViewMode("access")}
-              style={{
-                padding: "6px 12px",
-                border: "none",
-                borderRadius: 4,
-                fontSize: 14,
-                cursor: "pointer",
-                background: viewMode === "access" ? "#15803d" : "transparent",
-                color: viewMode === "access" ? "#fff" : "#475569",
-                fontWeight: viewMode === "access" ? 500 : 400
-              }}
-            >
-              ACCESS Payments
-            </button>
-            <button
-              onClick={() => setViewMode("summary")}
-              style={{
-                padding: "6px 12px",
-                border: "none",
-                borderRadius: 4,
-                fontSize: 14,
-                cursor: "pointer",
-                background: viewMode === "summary" ? "#15803d" : "transparent",
-                color: viewMode === "summary" ? "#fff" : "#475569",
-                fontWeight: viewMode === "summary" ? 500 : 400
-              }}
-            >
-              Summary of Unpaid Clients
+              {savingAllChanges ? "Saving All Changes..." : "SAVE ALL CHANGES"}
             </button>
           </div>
         </div>
@@ -1139,7 +1237,7 @@ const ClientsSalariesPaymentTraker = () => {
               }}
             >
               <h2 style={{ color: "#FFFFFF", margin: 0, fontSize: "22px", fontWeight: 800 }}>
-                Clients Due for Payment: <span style={{ color: "#FECACA", fontSize: "14px", fontWeight: 600 }}>Active cycle: {activeSalaryCycleLabel}</span>
+                Clients Due for Payment: <span style={{ color: "#FECACA", fontSize: "16px", fontWeight: 700 }}>Active cycle: {activeSalaryCycleLabel}</span>
               </h2>
             </div>
 
@@ -1160,7 +1258,7 @@ const ClientsSalariesPaymentTraker = () => {
               }}
             >
               <h2 style={{ color: "#FFFFFF", margin: 0, fontSize: "22px", fontWeight: 800 }}>
-                PAID Salaries: <span style={{ color: "#DCFCE7", fontSize: "14px", fontWeight: 600 }}>Active cycle: {activeSalaryCycleLabel}</span>
+                PAID Salaries: <span style={{ color: "#DCFCE7", fontSize: "16px", fontWeight: 700 }}>Active cycle: {activeSalaryCycleLabel}</span>
               </h2>
             </div>
 
