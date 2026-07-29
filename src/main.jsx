@@ -9,6 +9,7 @@ import VatDashboard from './VatDashboard.jsx';
 import AppSelector from './AppSelector';
 import LicenseDashboard from './LicenseDashboard';
 import ClosingDashboard from './ClosingDashboard';
+import UnifiedClientDashboard from './UnifiedClientDashboard';
 import Signup from './Signup';
 import AddUser from './AddUser';
 import './index.css';
@@ -29,6 +30,7 @@ const App = () => {
         <Route path="/vat-dashboard" element={<VatDashboard />} />
         <Route path="/license-dashboard" element={<LicenseDashboard />} />
         <Route path="/closing-dashboard" element={<ClosingDashboard />} />
+        <Route path="/unified-client-dashboard" element={<UnifiedClientDashboard />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/add-user" element={<AddUser />} />
       </Routes>
