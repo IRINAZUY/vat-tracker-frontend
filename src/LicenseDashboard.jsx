@@ -30,6 +30,8 @@ const LicenseDashboard = () => {
   const [newExpiryDateForUpdate, setNewExpiryDateForUpdate] = useState("");
   const [user, loading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
 
   const navigate = useNavigate();
 
@@ -58,17 +60,27 @@ const LicenseDashboard = () => {
         try {
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
-          if (userSnap.exists() && userSnap.data().role === "admin") {
-            setIsAdmin(true);
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            const userRole = userData.role;
+            
+            // Set admin status for both admin and superAdmin
+            setIsAdmin(userRole === "admin" || userRole === "superAdmin");
+            
+            // Set super admin status only for superAdmin
+            setIsSuperAdmin(userRole === "superAdmin");
           } else {
             setIsAdmin(false);
+            setIsSuperAdmin(false);
           }
         } catch (error) {
           console.error("Error checking admin status:", error);
           setIsAdmin(false);
+          setIsSuperAdmin(false);
         }
       } else {
         setIsAdmin(false);
+        setIsSuperAdmin(false);
       }
     };
     checkAdmin();
@@ -102,6 +114,64 @@ const LicenseDashboard = () => {
     }
   };
 
+  const resetLicenseForm = () => {
+    setCompanyName("");
+    setLicenseNumber("");
+    setLicenseType("");
+    setIssueDate("");
+    setExpiryDate("");
+    setEditingLicense(null);
+  };
+
+  const normalizeLicenseNumber = (value) => (value || "").trim().toLowerCase();
+
+  const hasDuplicateLicenseNumber = () => {
+    const normalizedLicenseNumber = normalizeLicenseNumber(licenseNumber);
+
+    return licenses.some((license) => {
+      if (editingLicense && license.id === editingLicense.id) {
+        return false;
+      }
+
+      return normalizeLicenseNumber(license.licenseNumber) === normalizedLicenseNumber;
+    });
+  };
+
+  const saveLicense = async () => {
+    const issueDateObj = new Date(issueDate);
+    const expiryDateObj = new Date(expiryDate);
+    const isEditing = Boolean(editingLicense);
+
+    if (isEditing) {
+      await updateDoc(doc(db, "licenses", editingLicense.id), {
+        companyName,
+        licenseNumber,
+        licenseType,
+        issueDate: issueDateObj,
+        expiryDate: expiryDateObj,
+        status: "ACTIVE",
+        createdBy: auth.currentUser.uid
+      });
+    } else {
+      console.log("Adding new license to Firestore...");
+      const docRef = await addDoc(collection(db, "licenses"), {
+        companyName,
+        licenseNumber,
+        licenseType,
+        issueDate: issueDateObj,
+        expiryDate: expiryDateObj,
+        status: "ACTIVE",
+        createdBy: auth.currentUser.uid,
+      });
+      console.log("License added successfully with ID:", docRef.id);
+    }
+
+    resetLicenseForm();
+    setError("");
+    alert(isEditing ? "✅ License updated!" : "✅ License added!");
+    fetchLicenses();
+  };
+
   // Add or update license
   const handleAddOrUpdateLicense = async (e) => {
     e.preventDefault();
@@ -114,43 +184,12 @@ const LicenseDashboard = () => {
     console.log("User authenticated:", auth.currentUser.uid);
 
     try {
-      const issueDateObj = new Date(issueDate);
-      const expiryDateObj = new Date(expiryDate);
-
-      if (editingLicense) {
-        await updateDoc(doc(db, "licenses", editingLicense.id), {
-          companyName,
-          licenseNumber,
-          licenseType,
-          issueDate: issueDateObj,
-          expiryDate: expiryDateObj,
-          status: "ACTIVE"
-        });
-        setEditingLicense(null);
-      } else {
-        console.log("Adding new license to Firestore...");
-        const docRef = await addDoc(collection(db, "licenses"), {
-          companyName,
-          licenseNumber,
-          licenseType,
-          issueDate: issueDateObj,
-          expiryDate: expiryDateObj,
-          status: "ACTIVE",
-          createdBy: auth.currentUser.uid,
-        });
-        console.log("License added successfully with ID:", docRef.id);
+      if (!editingLicense && hasDuplicateLicenseNumber()) {
+        setShowDuplicateWarning(true);
+        return;
       }
 
-      // Reset form
-      setCompanyName("");
-      setLicenseNumber("");
-      setLicenseType("");
-      setIssueDate("");
-      setExpiryDate("");
-      setError("");
-      alert(editingLicense ? "✅ License updated!" : "✅ License added!");
-
-      fetchLicenses();
+      await saveLicense();
     } catch (err) {
       setError("❌ Failed to add/update license.");
       console.error(err);
@@ -250,9 +289,19 @@ const LicenseDashboard = () => {
     }
   };
 
+  const sortLicensesAlphabetically = (licensesData) => {
+    return [...licensesData].sort((a, b) =>
+      (a.companyName || "").trim().localeCompare((b.companyName || "").trim(), undefined, {
+        sensitivity: "base",
+      })
+    );
+  };
+
   // Separate licenses by alert zones - only GREEN and EXPIRED now
   const expiredLicenses = licenses.filter(license => getAlertZone(license).zone === 'EXPIRED');
-  const greenZoneLicenses = licenses.filter(license => getAlertZone(license).zone === 'GREEN');
+  const greenZoneLicenses = sortLicensesAlphabetically(
+    licenses.filter(license => getAlertZone(license).zone === 'GREEN')
+  );
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -345,22 +394,22 @@ const LicenseDashboard = () => {
                             UPDATE in FTA
                           </button>
                         )}
-                        {isAdmin && (
-                          <>
-                            <button 
-                              onClick={() => handleEditLicense(license)}
-                              style={{ backgroundColor: "#FF8C00", color: "white", padding: "5px 10px", marginRight: "5px", border: "none", borderRadius: "3px", cursor: "pointer" }}
-                            >
-                              Edit
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteLicense(license.id)}
-                              style={{ backgroundColor: "#666", color: "white", padding: "5px 10px", border: "none", borderRadius: "3px", cursor: "pointer" }}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
+                        {isSuperAdmin && (
+                           <>
+                             <button 
+                               onClick={() => handleEditLicense(license)}
+                               style={{ backgroundColor: "#FF8C00", color: "white", padding: "5px 10px", marginRight: "5px", border: "none", borderRadius: "3px", cursor: "pointer" }}
+                             >
+                               Edit
+                             </button>
+                             <button 
+                               onClick={() => handleDeleteLicense(license.id)}
+                               style={{ backgroundColor: "#666", color: "white", padding: "5px 10px", border: "none", borderRadius: "3px", cursor: "pointer" }}
+                             >
+                               Delete
+                             </button>
+                           </>
+                         )}
                       </>
                     ) : (
                       <>
@@ -370,22 +419,22 @@ const LicenseDashboard = () => {
                         >
                           Renew
                         </button>
-                        {isAdmin && (
-                          <>
-                            <button 
-                              onClick={() => handleEditLicense(license)}
-                              style={{ backgroundColor: "#FF8C00", color: "white", padding: "5px 10px", marginRight: "5px", border: "none", borderRadius: "3px", cursor: "pointer" }}
-                            >
-                              Edit
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteLicense(license.id)}
-                              style={{ backgroundColor: "#666", color: "white", padding: "5px 10px", border: "none", borderRadius: "3px", cursor: "pointer" }}
-                            >
-                              Delete
-                            </button>
-                          </>
-                        )}
+                        {isSuperAdmin && (
+                           <>
+                             <button 
+                               onClick={() => handleEditLicense(license)}
+                               style={{ backgroundColor: "#FF8C00", color: "white", padding: "5px 10px", marginRight: "5px", border: "none", borderRadius: "3px", cursor: "pointer" }}
+                             >
+                               Edit
+                             </button>
+                             <button 
+                               onClick={() => handleDeleteLicense(license.id)}
+                               style={{ backgroundColor: "#666", color: "white", padding: "5px 10px", border: "none", borderRadius: "3px", cursor: "pointer" }}
+                             >
+                               Delete
+                             </button>
+                           </>
+                         )}
                       </>
                     )}
                   </td>
@@ -400,6 +449,61 @@ const LicenseDashboard = () => {
 
   return (
     <div style={{ backgroundColor: "#E8F5E8", minHeight: "100vh", position: "relative" }}>
+      {showDuplicateWarning && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "white",
+              borderRadius: "12px",
+              padding: "24px",
+              width: "90%",
+              maxWidth: "460px",
+              boxShadow: "0 12px 30px rgba(0, 0, 0, 0.2)",
+              textAlign: "center"
+            }}
+          >
+            <h3 style={{ color: "#B45309", marginTop: 0 }}>Warning</h3>
+            <p style={{ color: "#333", marginBottom: "24px" }}>
+              Dublication entry, this license number already exist
+            </p>
+            <div style={{ display: "flex", justifyContent: "center", gap: "12px" }}>
+              <button
+                type="button"
+                onClick={() => setShowDuplicateWarning(false)}
+                style={{ backgroundColor: "#666", color: "white", padding: "12px 20px", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px" }}
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setShowDuplicateWarning(false);
+                    await saveLicense();
+                  } catch (err) {
+                    setError("❌ Failed to add/update license.");
+                    console.error(err);
+                  }
+                }}
+                style={{ backgroundColor: "#FF8C00", color: "white", padding: "12px 20px", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px" }}
+              >
+                ADD ANYWAY
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <UnifiedHeader 
         title="License Tracker" 
         userEmail={user?.email} 
@@ -470,12 +574,7 @@ const LicenseDashboard = () => {
             <button 
               type="button" 
               onClick={() => {
-                setEditingLicense(null);
-                setCompanyName("");
-                setLicenseNumber("");
-                setLicenseType("");
-                setIssueDate("");
-                setExpiryDate("");
+                resetLicenseForm();
               }}
               style={{ backgroundColor: "#666", color: "white", padding: "12px", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "16px" }}
             >
