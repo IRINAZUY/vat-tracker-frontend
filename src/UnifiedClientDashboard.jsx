@@ -9,6 +9,9 @@ import BottomRightLogo from "./components/BottomRightLogo";
 import { getUnifiedClientDatabase, updateClientClosingInfo, deleteUnifiedClient } from "./services/UnifiedClientService";
 
 const UnifiedClientDashboard = () => {
+  // #region debug-point A:init
+  fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"A",location:"UnifiedClientDashboard.jsx:init",msg:"[DEBUG] UnifiedClientDashboard initialized",data:{href:typeof window!=="undefined"?window.location.href:null},ts:Date.now()})}).catch(()=>{});
+  // #endregion
   const [unifiedData, setUnifiedData] = useState({ clients: [], stats: {} });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -41,6 +44,9 @@ const UnifiedClientDashboard = () => {
     const checkAdminStatus = async () => {
       if (user) {
         try {
+          // #region debug-point D:check-admin-start
+          fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:start",msg:"[DEBUG] Checking admin status",data:{uid:user.uid,email:user.email},ts:Date.now()})}).catch(()=>{});
+          // #endregion
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
           if (userSnap.exists()) {
@@ -48,9 +54,15 @@ const UnifiedClientDashboard = () => {
             const userRole = userData?.role;
             setIsAdmin(userRole === "admin" || userRole === "superAdmin");
             setIsSuperAdmin(userRole === "superAdmin");
+            // #region debug-point D:check-admin-result
+            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:result",msg:"[DEBUG] Admin status loaded",data:{role:userRole,isAdmin:userRole==="admin"||userRole==="superAdmin",isSuperAdmin:userRole==="superAdmin"},ts:Date.now()})}).catch(()=>{});
+            // #endregion
           }
         } catch (error) {
           console.error('Error checking admin status:', error);
+          // #region debug-point D:check-admin-error
+          fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:error",msg:"[DEBUG] Admin status check failed",data:{name:error?.name,message:error?.message,stack:error?.stack},ts:Date.now()})}).catch(()=>{});
+          // #endregion
         }
       }
     };
@@ -65,11 +77,20 @@ const UnifiedClientDashboard = () => {
   const loadUnifiedData = async () => {
     try {
       setLoading(true);
+      // #region debug-point B:load-start
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"B",location:"UnifiedClientDashboard.jsx:loadUnifiedData:start",msg:"[DEBUG] Loading unified data",data:{hasUser:Boolean(user),uid:user?.uid||null},ts:Date.now()})}).catch(()=>{});
+      // #endregion
       const data = await getUnifiedClientDatabase();
       setUnifiedData(data);
+      // #region debug-point B:load-success
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"B",location:"UnifiedClientDashboard.jsx:loadUnifiedData:success",msg:"[DEBUG] Unified data loaded",data:{clientCount:data?.clients?.length||0,stats:data?.stats||null},ts:Date.now()})}).catch(()=>{});
+      // #endregion
     } catch (error) {
       console.error('Error loading unified data:', error);
       setError('Failed to load client data');
+      // #region debug-point B:load-error
+      fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"B",location:"UnifiedClientDashboard.jsx:loadUnifiedData:error",msg:"[DEBUG] Unified data load failed",data:{name:error?.name,message:error?.message,stack:error?.stack},ts:Date.now()})}).catch(()=>{});
+      // #endregion
     } finally {
       setLoading(false);
     }
@@ -173,6 +194,23 @@ const UnifiedClientDashboard = () => {
     if (client.sourceCount >= 2) return '⚠️';
     return '❌';
   };
+
+  useEffect(() => {
+    // #region debug-point A:runtime-errors
+    const onError = (event) => fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"A",location:"UnifiedClientDashboard.jsx:window:error",msg:"[DEBUG] Window error captured",data:{message:event?.message||null,filename:event?.filename||null,lineno:event?.lineno||null,colno:event?.colno||null,errorMessage:event?.error?.message||null,errorStack:event?.error?.stack||null},ts:Date.now()})}).catch(()=>{});
+    const onUnhandledRejection = (event) => fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"A",location:"UnifiedClientDashboard.jsx:window:unhandledrejection",msg:"[DEBUG] Unhandled promise rejection captured",data:{reasonMessage:event?.reason?.message||String(event?.reason),reasonStack:event?.reason?.stack||null},ts:Date.now()})}).catch(()=>{});
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+    // #endregion
+  }, []);
+
+  // #region debug-point E:render-state
+  fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"E",location:"UnifiedClientDashboard.jsx:render",msg:"[DEBUG] UnifiedClientDashboard render state",data:{loading,userLoading,hasUser:Boolean(user),clientCount:unifiedData?.clients?.length||0,filteredCount:filteredClients?.length||0,error:error||null,isAdmin,isSuperAdmin},ts:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (userLoading || loading) {
     return (

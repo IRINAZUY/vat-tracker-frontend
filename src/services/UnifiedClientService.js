@@ -174,6 +174,9 @@ const fetchClosingClients = async () => {
  */
 export const getUnifiedClientDatabase = async () => {
   try {
+    // #region debug-point B:aggregate-start
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"B",location:"UnifiedClientService.js:getUnifiedClientDatabase:start",msg:"[DEBUG] Starting unified aggregation",data:{uid:auth.currentUser?.uid||null},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     console.log('🚀 Starting Unified Client Database aggregation...');
     
     const [vatClients, licenseClients, closingClients] = await Promise.all([
@@ -181,6 +184,10 @@ export const getUnifiedClientDatabase = async () => {
       fetchLicenseClients(),
       fetchClosingClients()
     ]);
+
+    // #region debug-point B:aggregate-fetched
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"B",location:"UnifiedClientService.js:getUnifiedClientDatabase:fetched",msg:"[DEBUG] Source collections fetched",data:{vatCount:vatClients.length,licenseCount:licenseClients.length,closingCount:closingClients.length},ts:Date.now()})}).catch(()=>{});
+    // #endregion
 
     console.log('📊 Data fetched - VAT:', vatClients.length, 'License:', licenseClients.length, 'Closing:', closingClients.length);
 
@@ -296,6 +303,10 @@ export const getUnifiedClientDatabase = async () => {
       }
     };
 
+    // #region debug-point E:aggregate-result
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"E",location:"UnifiedClientService.js:getUnifiedClientDatabase:result",msg:"[DEBUG] Unified aggregation completed",data:{total:result.stats.total,complete:result.stats.complete,needsBookkeeper:result.stats.needsBookkeeper,needsClosingDay:result.stats.needsClosingDay,sampleClient:result.clients[0]?.companyName||null},ts:Date.now()})}).catch(()=>{});
+    // #endregion
+
     console.log('✅ Unified Client Database created successfully:', result.stats);
     return result;
   } catch (error) {
@@ -303,6 +314,9 @@ export const getUnifiedClientDatabase = async () => {
     console.error('❌ Error code:', error.code);
     console.error('❌ Error message:', error.message);
     console.error('❌ Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    // #region debug-point B:aggregate-error
+    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"B",location:"UnifiedClientService.js:getUnifiedClientDatabase:error",msg:"[DEBUG] Unified aggregation failed",data:{name:error?.name,message:error?.message,stack:error?.stack},ts:Date.now()})}).catch(()=>{});
+    // #endregion
     throw error;
   }
 };
