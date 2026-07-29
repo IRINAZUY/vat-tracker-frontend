@@ -8,7 +8,7 @@ import Login from './Login';
 import VatDashboard from './VatDashboard.jsx';
 import AppSelector from './AppSelector';
 import LicenseDashboard from './LicenseDashboard';
-import ClosingDashboard from './ClosingDashboard';
+import ClosingDashboard from './closingdashboard.jsx';
 import UnifiedClientDashboard from './UnifiedClientDashboard';
 import Signup from './Signup';
 import AddUser from './AddUser';
