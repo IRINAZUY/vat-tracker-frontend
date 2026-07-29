@@ -10,6 +10,9 @@ const AppSelector = () => {
   const [user, loading] = useAuthState(auth);
   const [userPermissions, setUserPermissions] = useState({});
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [userRole, setUserRole] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
   const navigate = useNavigate();
 
   // Redirect to login if not authenticated
@@ -19,24 +22,57 @@ const AppSelector = () => {
     }
   }, [user, loading, navigate]);
 
-  // Fetch user permissions
+  // Check if user is admin and get role
   useEffect(() => {
-    const fetchUserPermissions = async () => {
+    const checkUserRole = async () => {
       if (user) {
         try {
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
           if (userSnap.exists()) {
             const userData = userSnap.data();
-            setUserPermissions(userData.permissions || {});
-            setIsAdmin(userData.role === "admin");
+            const role = userData.role;
+            
+            // Store the user role and job title
+            setUserRole(role);
+            setJobTitle(userData.jobTitle || "");
+            
+            // Set admin status for both admin and superAdmin
+            setIsAdmin(role === "admin" || role === "superAdmin");
+            
+            // Set super admin status only for superAdmin
+            setIsSuperAdmin(role === "superAdmin");
+            
+            // For accountant role, only allow VAT tracker access
+            if (role === "accountant") {
+              setUserPermissions({
+                closingTracker: false,
+                licenseTracker: false,
+                vatTracker: userData.permissions?.vatTracker || false,
+                vatTrackerAccess: userData.permissions?.vatTracker || false,
+                licenseAccess: false
+              });
+            } else {
+              // For admin and superAdmin, use existing permissions logic
+              setUserPermissions({
+                closingTracker: userData.closingTracker || false,
+                licenseTracker: userData.licenseTracker || false,
+                vatTracker: userData.vatTracker || false,
+                // Keep these for backward compatibility
+                vatTrackerAccess: userData.vatTrackerAccess || userData.vatTracker || false,
+                licenseAccess: userData.licenseAccess || userData.licenseTracker || false
+              });
+            }
           }
         } catch (error) {
-          console.error("Error fetching user permissions:", error);
+          console.error("Error checking user role:", error);
         }
       }
     };
-    fetchUserPermissions();
+
+    if (user) {
+      checkUserRole();
+    }
   }, [user]);
 
   const handleLogout = async () => {
@@ -66,7 +102,10 @@ const AppSelector = () => {
 
       <div style={{ textAlign: "center", marginBottom: "30px", marginTop: "60px" }}>
         <h1 style={{ color: "#15803d", marginBottom: "10px" }}>Access Accounting Management System</h1>
-        <p style={{ color: "#666", fontSize: "18px" }}>Welcome, {user.email}</p>
+        <p style={{ color: "#666", fontSize: "18px" }}>
+          Welcome, {user.email}
+          {jobTitle && <span style={{ color: "#7C3AED", fontWeight: "bold" }}> - {jobTitle}</span>}
+        </p>
       </div>
 
       <div style={{ maxWidth: "800px", margin: "0 auto" }}>
@@ -153,6 +192,60 @@ const AppSelector = () => {
               <p style={{ color: "#666", fontSize: "14px" }}>Monthly client closing schedule management</p>
             </div>
           )}
+
+          {/* Unified Client Database - Admin Only */}
+          {isAdmin && (
+            <div style={{
+              backgroundColor: "white",
+              border: "2px solid #7C3AED",
+              borderRadius: "10px",
+              padding: "30px",
+              textAlign: "center",
+              cursor: "pointer",
+              transition: "all 0.3s ease",
+              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+            }}
+            onClick={() => handleAppSelection('unified-client-dashboard')}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "#f8f5ff";
+              e.target.style.transform = "translateY(-5px)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "white";
+              e.target.style.transform = "translateY(0)";
+            }}>
+              <div style={{ fontSize: "48px", marginBottom: "15px" }}>🗂️</div>
+              <h3 style={{ color: "#7C3AED", marginBottom: "10px" }}>Unified Client Database</h3>
+              <p style={{ color: "#666", fontSize: "14px" }}>Comprehensive client management across all systems</p>
+            </div>
+          )}
+
+          {/* KPI Report Generator - Super Admin Only */}
+          {isSuperAdmin && (
+            <div style={{
+              backgroundColor: "white",
+              border: "2px solid #DC2626",
+              borderRadius: "10px",
+              padding: "30px",
+              textAlign: "center",
+              cursor: "pointer",
+              transition: "all 0.3s ease",
+              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+            }}
+            onClick={() => handleAppSelection('kpi-reports')}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = "#fef2f2";
+              e.target.style.transform = "translateY(-5px)";
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = "white";
+              e.target.style.transform = "translateY(0)";
+            }}>
+              <div style={{ fontSize: "48px", marginBottom: "15px" }}>📈</div>
+              <h3 style={{ color: "#DC2626", marginBottom: "10px" }}>KPI Reports</h3>
+              <p style={{ color: "#666", fontSize: "14px" }}>Monthly performance tracking and email reports</p>
+            </div>
+          )}
         </div>
 
 
@@ -188,9 +281,9 @@ const AppSelector = () => {
         }}>
           <h3 style={{ margin: "0 0 10px 0", color: "#15803d", fontSize: "16px" }}>Admin Controls</h3>
           <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "#666" }}>
-            Current user: {user?.email} | Admin status: {isAdmin ? "✅ Admin" : "❌ Not Admin"}
+            Current user: {user?.email} | Role: {isSuperAdmin ? "🔥 Super Admin" : isAdmin ? "⭐ Admin" : "👤 User"}
           </p>
-          {isAdmin ? (
+          {isSuperAdmin ? (
             <button
               onClick={() => navigate("/add-user")}
               style={{
@@ -207,9 +300,13 @@ const AppSelector = () => {
             >
               ➕ Add New User
             </button>
+          ) : isAdmin ? (
+            <p style={{ color: "#FF8C00", margin: "0", fontSize: "12px" }}>
+              User management is restricted to Super Admin only.
+            </p>
           ) : (
             <p style={{ color: "#FF8C00", margin: "0", fontSize: "12px" }}>
-              You need admin privileges to add new users.
+              You need admin privileges to access admin functions.
             </p>
           )}
         </div>
