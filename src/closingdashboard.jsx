@@ -7,6 +7,7 @@ import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc, getDoc, setDoc,
 import UnifiedHeader from "./components/UnifiedHeader";
 import BottomRightLogo from "./components/BottomRightLogo";
 import { getUnifiedClientDatabase, updateClientClosingInfo, removeClientClosingInfo } from "./services/UnifiedClientService";
+import { findUserProfile, getUserAccessState, hasAppAccess } from "./userAccess";
 
 // Constants
 const DAY_BUCKETS = [10, 15, 20, 25, 30];
@@ -645,6 +646,8 @@ const [viewMode, setViewMode] = useState("day");
 const [loadingData, setLoadingData] = useState(true);
 const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 const [isAdmin, setIsAdmin] = useState(false);
+const [hasPageAccess, setHasPageAccess] = useState(false);
+const [accessChecked, setAccessChecked] = useState(false);
 const [userData, setUserData] = useState(null);
 
 
@@ -698,7 +701,7 @@ return {};
 
 // Load data from Firestore and set up real-time listeners
 useEffect(() => {
-if (!user) return;
+if (!user || !accessChecked || !hasPageAccess) return;
 
 setLoadingData(true);
 // Initial data fetch
@@ -744,43 +747,42 @@ unsubscribeVat();
 unsubscribeLicense();
 unsubscribeStatus();
 };
-}, [user]);
+}, [user, accessChecked, hasPageAccess]);
 
 // Check user role from Firestore - Changed to check for Super Admin
 useEffect(() => {
 const checkUserRole = async () => {
-if (user) {
-try {
-const userRef = doc(db, "users", user.uid);
-const userSnap = await getDoc(userRef);
-if (userSnap.exists()) {
-const data = userSnap.data();
-setUserData(data);
-
-// Set admin status for both admin and superAdmin roles
-        const isAdminRole = data.role === "admin" || data.role === "superAdmin";
-        setIsAdmin(isAdminRole);
-
-        if (data.role === "superAdmin") {
-          console.log("User is super admin:", user.email);
-          setIsSuperAdmin(true);
-        } else {
-          console.log("User is not super admin:", user.email);
-          setIsSuperAdmin(false);
-          console.log("User role:", data.role);
-        }
-} else {
-console.log("User document does not exist");
+if (!user) {
 setIsSuperAdmin(false);
 setIsAdmin(false);
+setHasPageAccess(false);
 setUserData(null);
+setAccessChecked(true);
+return;
+}
+
+try {
+const data = await findUserProfile(user);
+const accessState = getUserAccessState(data || {});
+setUserData(data);
+setIsSuperAdmin(accessState.isSuperAdmin);
+setIsAdmin(accessState.isAdmin);
+setHasPageAccess(hasAppAccess("closingTracker", accessState));
+
+if (accessState.isSuperAdmin) {
+console.log("User is super admin:", user.email);
+} else {
+console.log("User is not super admin:", user.email);
+console.log("User role:", accessState.role);
 }
 } catch (error) {
 console.error("Error fetching user role:", error);
 setIsSuperAdmin(false);
 setIsAdmin(false);
+setHasPageAccess(false);
 setUserData(null);
-}
+} finally {
+setAccessChecked(true);
 }
 };
 
@@ -793,6 +795,12 @@ if (!loading && !user) {
 navigate("/", { replace: true });
 }
 }, [user, loading, navigate]);
+
+useEffect(() => {
+if (user && accessChecked && !hasPageAccess) {
+navigate("/app-selector", { replace: true });
+}
+}, [user, accessChecked, hasPageAccess, navigate]);
 
 const filtered = useMemo(() => {
 return clients
@@ -824,7 +832,7 @@ return { total, verified, pending, pct: pct(verified, total) };
 }, [clients, statusMap, mKey]); // Use clients instead of filtered
 
 // Show loading state while checking authentication
-if (loading) {
+if (loading || !accessChecked) {
 return (
 <div style={{ backgroundColor: "#E8F5E8", minHeight: "100vh", padding: "20px", textAlign: "center" }}>
 <h2 style={{ color: "#15803d" }}>Loading Closing Dashboard...</h2>
@@ -835,6 +843,10 @@ return (
 
 // Don't render anything if not authenticated (will redirect)
 if (!user) {
+return null;
+}
+
+if (!hasPageAccess) {
 return null;
 }
 

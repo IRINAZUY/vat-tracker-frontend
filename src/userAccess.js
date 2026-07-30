@@ -113,4 +113,4 @@ export const getUserAccessState = (userData = {}) => {
 };
 
 export const hasAppAccess = (permissionKey, accessState) =>
-  Boolean(accessState?.isAdmin || accessState?.permissions?.[permissionKey]);
+  Boolean(accessState?.isSuperAdmin || accessState?.permissions?.[permissionKey]);

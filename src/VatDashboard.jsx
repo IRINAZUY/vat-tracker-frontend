@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth, db } from "./dynamic-firebase-config";
 import { signOut } from "firebase/auth";
-import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc, getDoc } from "firebase/firestore";
+import { collection, addDoc, getDocs, updateDoc, doc, deleteDoc } from "firebase/firestore";
 import UnifiedHeader from "./components/UnifiedHeader";
 import BottomRightLogo from "./components/BottomRightLogo";
+import { findUserProfile, getUserAccessState, hasAppAccess } from "./userAccess";
 
 const VatDashboard = () => {
   const [companyName, setCompanyName] = useState("");
@@ -17,6 +18,8 @@ const VatDashboard = () => {
   const [user, loading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasPageAccess, setHasPageAccess] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
 
   const navigate = useNavigate();
 
@@ -79,50 +82,50 @@ const fetchClients = async () => {
   
   useEffect(() => {
     const checkUserRole = async () => {
-      if (user) {
-        try {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const data = userSnap.data();
-            setUserData(data);
-            const userRole = data.role;
-            
-            // Set admin status for both admin and superAdmin
-            setIsAdmin(userRole === "admin" || userRole === "superAdmin");
-            
-            // Set super admin status only for superAdmin
-            setIsSuperAdmin(userRole === "superAdmin");
-            
-            if (userRole === "admin" || userRole === "superAdmin") {
-              console.log("User is admin/superAdmin:", user.email);
-            } else {
-              console.log("User is not admin:", user.email);
-              console.log("User role:", userRole);
-            }
-          } else {
-            console.log("User document does not exist");
-            setIsAdmin(false);
-            setIsSuperAdmin(false);
-            setUserData(null);
-          }
-        } catch (error) {
-          console.error("Error checking user status:", error);
-          setIsAdmin(false);
-          setIsSuperAdmin(false);
-          setUserData(null);
-        }
-      } else {
+      if (!user) {
         setIsAdmin(false);
         setIsSuperAdmin(false);
+        setHasPageAccess(false);
         setUserData(null);
+        setAccessChecked(true);
+        return;
+      }
+
+      try {
+        const profile = await findUserProfile(user);
+        const accessState = getUserAccessState(profile || {});
+        setUserData(profile);
+        setIsAdmin(accessState.isAdmin);
+        setIsSuperAdmin(accessState.isSuperAdmin);
+        setHasPageAccess(hasAppAccess("vatTracker", accessState));
+
+        if (accessState.isAdmin) {
+          console.log("User is admin/superAdmin:", user.email);
+        } else {
+          console.log("User is not admin:", user.email);
+          console.log("User role:", accessState.role);
+        }
+      } catch (error) {
+        console.error("Error checking user status:", error);
+        setIsAdmin(false);
+        setIsSuperAdmin(false);
+        setHasPageAccess(false);
+        setUserData(null);
+      } finally {
+        setAccessChecked(true);
       }
     };
     checkUserRole();
   }, [user]);
 
 useEffect(() => {
-  console.log("Dashboard useEffect - Auth state:", { loading, user: user?.email, userData });
+  if (user && accessChecked && !hasPageAccess) {
+    navigate("/app-selector", { replace: true });
+  }
+}, [user, accessChecked, hasPageAccess, navigate]);
+
+useEffect(() => {
+  console.log("Dashboard useEffect - Auth state:", { loading, user: user?.email, userData, hasPageAccess });
  
   if (loading) {
     console.log("Still loading auth state...");
@@ -138,10 +141,15 @@ useEffect(() => {
     console.log("User data not loaded yet...");
     return;
   }
+
+  if (!accessChecked || !hasPageAccess) {
+    console.log("User does not have VAT page access yet...");
+    return;
+  }
  
   console.log("User authenticated and data loaded, fetching clients...");
   fetchClients();
-}, [user, loading, userData]);
+}, [user, loading, userData, accessChecked, hasPageAccess]);
 
   // ✅ Ensure clients moving to "Due for Submission This Month" are marked as "PENDING"
   useEffect(() => {
@@ -164,7 +172,7 @@ useEffect(() => {
   }, [clients]); // Runs when clients update
 
   // Early returns after all hooks are called
-  if (loading) {
+  if (loading || !accessChecked) {
     return (
       <div style={{ backgroundColor: "#E8F5E8", minHeight: "100vh", padding: "20px", textAlign: "center" }}>
         <h2 style={{ color: "#15803d" }}>Loading Dashboard...</h2>
@@ -180,6 +188,10 @@ useEffect(() => {
         <p>Please wait while we redirect you to the login page.</p>
       </div>
     );
+  }
+
+  if (!hasPageAccess) {
+    return null;
   }
 
   // ✅ Navigate to add user

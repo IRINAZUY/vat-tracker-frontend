@@ -9,13 +9,13 @@ import {
   updateDoc,
   deleteDoc,
   doc,
-  getDoc,
   query,
   where
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import UnifiedHeader from "./components/UnifiedHeader";
 import BottomRightLogo from "./components/BottomRightLogo";
+import { findUserProfile, getUserAccessState, hasAppAccess } from "./userAccess";
 
 const LicenseDashboard = () => {
   const [companyName, setCompanyName] = useState("");
@@ -31,6 +31,8 @@ const LicenseDashboard = () => {
   const [user, loading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasPageAccess, setHasPageAccess] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
 
   const navigate = useNavigate();
@@ -56,42 +58,44 @@ const LicenseDashboard = () => {
   // Check admin status
   useEffect(() => {
     const checkAdmin = async () => {
-      if (user) {
-        try {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const userData = userSnap.data();
-            const userRole = userData.role;
-            
-            // Set admin status for both admin and superAdmin
-            setIsAdmin(userRole === "admin" || userRole === "superAdmin");
-            
-            // Set super admin status only for superAdmin
-            setIsSuperAdmin(userRole === "superAdmin");
-          } else {
-            setIsAdmin(false);
-            setIsSuperAdmin(false);
-          }
-        } catch (error) {
-          console.error("Error checking admin status:", error);
-          setIsAdmin(false);
-          setIsSuperAdmin(false);
-        }
-      } else {
+      if (!user) {
         setIsAdmin(false);
         setIsSuperAdmin(false);
+        setHasPageAccess(false);
+        setAccessChecked(true);
+        return;
+      }
+
+      try {
+        const userData = await findUserProfile(user);
+        const accessState = getUserAccessState(userData || {});
+        setIsAdmin(accessState.isAdmin);
+        setIsSuperAdmin(accessState.isSuperAdmin);
+        setHasPageAccess(hasAppAccess("licenseTracker", accessState));
+      } catch (error) {
+        console.error("Error checking admin status:", error);
+        setIsAdmin(false);
+        setIsSuperAdmin(false);
+        setHasPageAccess(false);
+      } finally {
+        setAccessChecked(true);
       }
     };
     checkAdmin();
   }, [user]);
 
+  useEffect(() => {
+    if (user && accessChecked && !hasPageAccess) {
+      navigate("/app-selector", { replace: true });
+    }
+  }, [user, accessChecked, hasPageAccess, navigate]);
+
   // Fetch licenses
   useEffect(() => {
-    if (user && !loading) {
+    if (user && !loading && accessChecked && hasPageAccess) {
       fetchLicenses();
     }
-  }, [user, loading]);
+  }, [user, loading, accessChecked, hasPageAccess]);
 
   const fetchLicenses = async () => {
     try {
@@ -312,7 +316,7 @@ const LicenseDashboard = () => {
     navigate("/app-selector");
   };
 
-  if (loading) {
+  if (loading || !accessChecked) {
     return (
       <div style={{ backgroundColor: "#E8F5E8", minHeight: "100vh", padding: "20px", textAlign: "center" }}>
         <h2 style={{ color: "#15803d" }}>Loading License Dashboard...</h2>
@@ -321,6 +325,10 @@ const LicenseDashboard = () => {
   }
 
   if (!user) {
+    return null;
+  }
+
+  if (!hasPageAccess) {
     return null;
   }
 
