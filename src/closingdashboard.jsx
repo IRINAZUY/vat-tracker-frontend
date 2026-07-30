@@ -20,8 +20,9 @@ return result;
 };
 
 const getDueDate = (reportingMonth, closingDay) => {
-// Due date is the closing day in the reporting month itself
-return new Date(reportingMonth.getFullYear(), reportingMonth.getMonth(), closingDay);
+// Due date is the closing day in the following month
+const dueMonth = addMonths(reportingMonth, 1);
+return new Date(dueMonth.getFullYear(), dueMonth.getMonth(), closingDay);
 };
 
 const isOverdue = (dueDate) => {
