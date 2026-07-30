@@ -1,81 +1,60 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthState } from "react-firebase-hooks/auth";
-import { auth, db } from "./dynamic-firebase-config";
-import { doc, getDoc } from "firebase/firestore";
+import { auth } from "./dynamic-firebase-config";
 import { signOut } from "firebase/auth";
 import Logo from "./components/Logo";
+import { APP_REGISTRY } from "./appRegistry";
+import { findUserProfile, getUserAccessState, hasAppAccess } from "./userAccess";
 
 const SHOW_KPI_REPORTS = false;
 
+const APP_CARD_STYLE = {
+  backgroundColor: "white",
+  borderRadius: "10px",
+  padding: "30px",
+  textAlign: "center",
+  cursor: "pointer",
+  transition: "all 0.3s ease",
+  boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+};
+
 const AppSelector = () => {
   const [user, loading] = useAuthState(auth);
-  const [userPermissions, setUserPermissions] = useState({});
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [userRole, setUserRole] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
+  const [accessState, setAccessState] = useState(getUserAccessState());
   const navigate = useNavigate();
 
-  // Redirect to login if not authenticated
   useEffect(() => {
     if (!loading && !user) {
       navigate("/", { replace: true });
     }
   }, [user, loading, navigate]);
 
-  // Check if user is admin and get role
   useEffect(() => {
-    const checkUserRole = async () => {
-      if (user) {
-        try {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const userData = userSnap.data();
-            const role = userData.role;
-            
-            // Store the user role and job title
-            setUserRole(role);
-            setJobTitle(userData.jobTitle || "");
-            
-            // Set admin status for both admin and superAdmin
-            setIsAdmin(role === "admin" || role === "superAdmin");
-            
-            // Set super admin status only for superAdmin
-            setIsSuperAdmin(role === "superAdmin");
-            
-            // For accountant role, only allow VAT tracker access
-            if (role === "accountant") {
-              setUserPermissions({
-                closingTracker: false,
-                licenseTracker: false,
-                vatTracker: userData.permissions?.vatTracker || false,
-                vatTrackerAccess: userData.permissions?.vatTracker || false,
-                licenseAccess: false
-              });
-            } else {
-              // For admin and superAdmin, use existing permissions logic
-              setUserPermissions({
-                closingTracker: userData.closingTracker || false,
-                licenseTracker: userData.licenseTracker || false,
-                vatTracker: userData.vatTracker || false,
-                // Keep these for backward compatibility
-                vatTrackerAccess: userData.vatTrackerAccess || userData.vatTracker || false,
-                licenseAccess: userData.licenseAccess || userData.licenseTracker || false
-              });
-            }
-          }
-        } catch (error) {
-          console.error("Error checking user role:", error);
-        }
+    const loadUserAccess = async () => {
+      if (!user) {
+        setAccessState(getUserAccessState());
+        return;
+      }
+
+      try {
+        const profile = await findUserProfile(user);
+        setAccessState(getUserAccessState(profile || {}));
+      } catch (error) {
+        console.error("Error checking user role:", error);
+        setAccessState(getUserAccessState());
       }
     };
 
     if (user) {
-      checkUserRole();
+      loadUserAccess();
     }
   }, [user]);
+
+  const visibleApps = useMemo(
+    () => APP_REGISTRY.filter((app) => hasAppAccess(app.permissionKey, accessState)),
+    [accessState]
+  );
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -95,7 +74,7 @@ const AppSelector = () => {
   }
 
   if (!user) {
-    return null; // Will redirect
+    return null;
   }
 
   return (
@@ -106,209 +85,71 @@ const AppSelector = () => {
         <h1 style={{ color: "#15803d", marginBottom: "10px" }}>Access Accounting Management System</h1>
         <p style={{ color: "#666", fontSize: "18px" }}>
           Welcome, {user.email}
-          {jobTitle && <span style={{ color: "#7C3AED", fontWeight: "bold" }}> - {jobTitle}</span>}
+          {accessState.jobTitle && (
+            <span style={{ color: "#7C3AED", fontWeight: "bold" }}> - {accessState.jobTitle}</span>
+          )}
         </p>
       </div>
 
       <div style={{ maxWidth: "800px", margin: "0 auto" }}>
         <h2 style={{ color: "#15803d", textAlign: "center", marginBottom: "30px" }}>Select Application</h2>
-        
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "20px", marginBottom: "30px" }}>
-          {/* VAT Tracker */}
-          {(isAdmin || userPermissions.vatTracker) && (
-            <div style={{
-              backgroundColor: "white",
-              border: "2px solid #15803d",
-              borderRadius: "10px",
-              padding: "30px",
-              textAlign: "center",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-            }}
-            onClick={() => handleAppSelection('vat-dashboard')}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = "#f0f8f0";
-              e.target.style.transform = "translateY(-5px)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = "white";
-              e.target.style.transform = "translateY(0)";
-            }}>
-              <div style={{ fontSize: "48px", marginBottom: "15px" }}>📊</div>
-              <h3 style={{ color: "#15803d", marginBottom: "10px" }}>VAT Tracker</h3>
-              <p style={{ color: "#666", fontSize: "14px" }}>Manage VAT submissions and quarterly deadlines</p>
-            </div>
-          )}
 
-          {/* License Tracker */}
-          {(isAdmin || userPermissions.licenseTracker) && (
-            <div style={{
-              backgroundColor: "white",
-              border: "2px solid #FF8C00",
-              borderRadius: "10px",
-              padding: "30px",
-              textAlign: "center",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-            }}
-            onClick={() => handleAppSelection('license-dashboard')}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = "#fff8f0";
-              e.target.style.transform = "translateY(-5px)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = "white";
-              e.target.style.transform = "translateY(0)";
-            }}>
-              <div style={{ fontSize: "48px", marginBottom: "15px" }}>📜</div>
-              <h3 style={{ color: "#FF8C00", marginBottom: "10px" }}>License Tracker</h3>
-              <p style={{ color: "#666", fontSize: "14px" }}>Track license renewals and expiration dates</p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+            gap: "20px",
+            marginBottom: "30px"
+          }}
+        >
+          {visibleApps.map((app) => (
+            <div
+              key={app.permissionKey}
+              style={{
+                ...APP_CARD_STYLE,
+                border: `2px solid ${app.borderColor}`
+              }}
+              onClick={() => handleAppSelection(app.route)}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.backgroundColor = app.hoverBackground;
+                event.currentTarget.style.transform = "translateY(-5px)";
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.backgroundColor = "white";
+                event.currentTarget.style.transform = "translateY(0)";
+              }}
+            >
+              <div style={{ fontSize: "48px", marginBottom: "15px" }}>{app.icon}</div>
+              <h3 style={{ color: app.borderColor, marginBottom: "10px" }}>{app.title}</h3>
+              <p style={{ color: "#666", fontSize: "14px" }}>{app.description}</p>
             </div>
-          )}
+          ))}
 
-          {/* CT Submission Tracker - Admin Only */}
-          {isAdmin && (
-            <div style={{
-              backgroundColor: "white",
-              border: "2px solid #2563EB",
-              borderRadius: "10px",
-              padding: "30px",
-              textAlign: "center",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-            }}
-            onClick={() => handleAppSelection("ct-dashboard")}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = "#eff6ff";
-              e.target.style.transform = "translateY(-5px)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = "white";
-              e.target.style.transform = "translateY(0)";
-            }}>
-              <div style={{ fontSize: "48px", marginBottom: "15px" }}>🏛️</div>
-              <h3 style={{ color: "#2563EB", marginBottom: "10px" }}>CT Submission Tracker</h3>
-              <p style={{ color: "#666", fontSize: "14px" }}>Track annual CT submissions synced from License Tracker</p>
-            </div>
-          )}
-
-          {/* Closing Tracker */}
-          {(isAdmin || userPermissions.closingTracker) && (
-            <div style={{
-              backgroundColor: "white",
-              border: "2px solid #FF6347",
-              borderRadius: "10px",
-              padding: "30px",
-              textAlign: "center",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-            }}
-            onClick={() => handleAppSelection('closing-dashboard')}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = "#fdf0f0";
-              e.target.style.transform = "translateY(-5px)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = "white";
-              e.target.style.transform = "translateY(0)";
-            }}>
-              <div style={{ fontSize: "48px", marginBottom: "15px" }}>📅</div>
-              <h3 style={{ color: "#FF6347", marginBottom: "10px" }}>Closing Tracker</h3>
-              <p style={{ color: "#666", fontSize: "14px" }}>Monthly client closing schedule management</p>
-            </div>
-          )}
-
-          {/* Unified Client Database - Admin Only */}
-          {isAdmin && (
-            <div style={{
-              backgroundColor: "white",
-              border: "2px solid #7C3AED",
-              borderRadius: "10px",
-              padding: "30px",
-              textAlign: "center",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-            }}
-            onClick={() => handleAppSelection('unified-client-dashboard')}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = "#f8f5ff";
-              e.target.style.transform = "translateY(-5px)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = "white";
-              e.target.style.transform = "translateY(0)";
-            }}>
-              <div style={{ fontSize: "48px", marginBottom: "15px" }}>🗂️</div>
-              <h3 style={{ color: "#7C3AED", marginBottom: "10px" }}>Unified Client Database</h3>
-              <p style={{ color: "#666", fontSize: "14px" }}>Comprehensive client management across all systems</p>
-            </div>
-          )}
-
-          {/* Clients' Salaries Payment Tracker - Admin Only */}
-          {isAdmin && (
-            <div style={{
-              backgroundColor: "white",
-              border: "2px solid #0F766E",
-              borderRadius: "10px",
-              padding: "30px",
-              textAlign: "center",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-            }}
-            onClick={() => handleAppSelection("clients-salaries-payment-traker")}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = "#f0fdfa";
-              e.target.style.transform = "translateY(-5px)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = "white";
-              e.target.style.transform = "translateY(0)";
-            }}>
-              <div style={{ fontSize: "48px", marginBottom: "15px" }}>💷</div>
-              <h3 style={{ color: "#0F766E", marginBottom: "10px" }}>Clients&apos; Salaries Payment Tracker</h3>
-              <p style={{ color: "#666", fontSize: "14px" }}>Dedicated workspace for salary payment tracking</p>
-            </div>
-          )}
-
-          {/* KPI Report Generator - Super Admin Only */}
-          {isSuperAdmin && SHOW_KPI_REPORTS && (
-            <div style={{
-              backgroundColor: "white",
-              border: "2px solid #DC2626",
-              borderRadius: "10px",
-              padding: "30px",
-              textAlign: "center",
-              cursor: "pointer",
-              transition: "all 0.3s ease",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-            }}
-            onClick={() => handleAppSelection('kpi-reports')}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = "#fef2f2";
-              e.target.style.transform = "translateY(-5px)";
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = "white";
-              e.target.style.transform = "translateY(0)";
-            }}>
-              <div style={{ fontSize: "48px", marginBottom: "15px" }}>📈</div>
+          {accessState.isSuperAdmin && SHOW_KPI_REPORTS && (
+            <div
+              style={{
+                ...APP_CARD_STYLE,
+                border: "2px solid #DC2626"
+              }}
+              onClick={() => handleAppSelection("kpi-reports")}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.backgroundColor = "#fef2f2";
+                event.currentTarget.style.transform = "translateY(-5px)";
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.backgroundColor = "white";
+                event.currentTarget.style.transform = "translateY(0)";
+              }}
+            >
+              <div style={{ fontSize: "48px", marginBottom: "15px" }}>{"\ud83d\udcc8"}</div>
               <h3 style={{ color: "#DC2626", marginBottom: "10px" }}>KPI Reports</h3>
               <p style={{ color: "#666", fontSize: "14px" }}>Monthly performance tracking and email reports</p>
             </div>
           )}
         </div>
 
-
-
-        {/* Logout Button */}
         <div style={{ textAlign: "center", marginBottom: "20px" }}>
-          <button 
+          <button
             onClick={handleLogout}
             style={{
               backgroundColor: "#666",
@@ -324,22 +165,23 @@ const AppSelector = () => {
           </button>
         </div>
 
-        {/* Admin Controls Section - Center under logout */}
-        <div style={{
-          textAlign: "center",
-          maxWidth: "400px",
-          margin: "0 auto",
-          padding: "15px",
-          backgroundColor: "#f0f8ff",
-          borderRadius: "8px",
-          border: "2px solid #15803d",
-          boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
-        }}>
+        <div
+          style={{
+            textAlign: "center",
+            maxWidth: "400px",
+            margin: "0 auto",
+            padding: "15px",
+            backgroundColor: "#f0f8ff",
+            borderRadius: "8px",
+            border: "2px solid #15803d",
+            boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+          }}
+        >
           <h3 style={{ margin: "0 0 10px 0", color: "#15803d", fontSize: "16px" }}>Admin Controls</h3>
           <p style={{ margin: "0 0 10px 0", fontSize: "12px", color: "#666" }}>
-            Current user: {user?.email} | Role: {isSuperAdmin ? "🔥 Super Admin" : isAdmin ? "⭐ Admin" : "👤 User"}
+            Current user: {user?.email} | Role: {accessState.isSuperAdmin ? "🔥 Super Admin" : accessState.isAdmin ? "⭐ Admin" : "👤 User"}
           </p>
-          {isSuperAdmin ? (
+          {accessState.isSuperAdmin ? (
             <button
               onClick={() => navigate("/add-user")}
               style={{
@@ -356,7 +198,7 @@ const AppSelector = () => {
             >
               ➕ Add New User
             </button>
-          ) : isAdmin ? (
+          ) : accessState.isAdmin ? (
             <p style={{ color: "#FF8C00", margin: "0", fontSize: "12px" }}>
               User management is restricted to Super Admin only.
             </p>

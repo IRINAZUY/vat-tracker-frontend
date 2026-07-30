@@ -7,6 +7,7 @@ import { signOut } from "firebase/auth";
 import UnifiedHeader from "./components/UnifiedHeader";
 import BottomRightLogo from "./components/BottomRightLogo";
 import { getUnifiedClientDatabase, updateClientClosingInfo, deleteUnifiedClient } from "./services/UnifiedClientService";
+import { findUserProfile, getUserAccessState, hasAppAccess } from "./userAccess";
 
 const UnifiedClientDashboard = () => {
   // #region debug-point A:init
@@ -24,6 +25,8 @@ const UnifiedClientDashboard = () => {
   const [notes, setNotes] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasPageAccess, setHasPageAccess] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
   const [clientToDelete, setClientToDelete] = useState(null);
   const [user, userLoading] = useAuthState(auth);
 
@@ -42,28 +45,36 @@ const UnifiedClientDashboard = () => {
   // Check admin status
   useEffect(() => {
     const checkAdminStatus = async () => {
-      if (user) {
-        try {
-          // #region debug-point D:check-admin-start
-          fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:start",msg:"[DEBUG] Checking admin status",data:{uid:user.uid,email:user.email},ts:Date.now()})}).catch(()=>{});
-          // #endregion
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const userData = userSnap.data();
-            const userRole = userData?.role;
-            setIsAdmin(userRole === "admin" || userRole === "superAdmin");
-            setIsSuperAdmin(userRole === "superAdmin");
-            // #region debug-point D:check-admin-result
-            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:result",msg:"[DEBUG] Admin status loaded",data:{role:userRole,isAdmin:userRole==="admin"||userRole==="superAdmin",isSuperAdmin:userRole==="superAdmin"},ts:Date.now()})}).catch(()=>{});
-            // #endregion
-          }
-        } catch (error) {
-          console.error('Error checking admin status:', error);
-          // #region debug-point D:check-admin-error
-          fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:error",msg:"[DEBUG] Admin status check failed",data:{name:error?.name,message:error?.message,stack:error?.stack},ts:Date.now()})}).catch(()=>{});
-          // #endregion
-        }
+      if (!user) {
+        setIsAdmin(false);
+        setIsSuperAdmin(false);
+        setHasPageAccess(false);
+        setAccessChecked(true);
+        return;
+      }
+
+      try {
+        // #region debug-point D:check-admin-start
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:start",msg:"[DEBUG] Checking admin status",data:{uid:user.uid,email:user.email},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+        const userData = await findUserProfile(user);
+        const accessState = getUserAccessState(userData || {});
+        setIsAdmin(accessState.isAdmin);
+        setIsSuperAdmin(accessState.isSuperAdmin);
+        setHasPageAccess(hasAppAccess("unifiedClientDatabase", accessState));
+        // #region debug-point D:check-admin-result
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:result",msg:"[DEBUG] Admin status loaded",data:{role:accessState.role,isAdmin:accessState.isAdmin,isSuperAdmin:accessState.isSuperAdmin,hasPageAccess:hasAppAccess("unifiedClientDatabase", accessState)},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+      } catch (error) {
+        console.error('Error checking admin status:', error);
+        setIsAdmin(false);
+        setIsSuperAdmin(false);
+        setHasPageAccess(false);
+        // #region debug-point D:check-admin-error
+        fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"D",location:"UnifiedClientDashboard.jsx:checkAdminStatus:error",msg:"[DEBUG] Admin status check failed",data:{name:error?.name,message:error?.message,stack:error?.stack},ts:Date.now()})}).catch(()=>{});
+        // #endregion
+      } finally {
+        setAccessChecked(true);
       }
     };
     checkAdminStatus();
@@ -71,8 +82,16 @@ const UnifiedClientDashboard = () => {
 
   // Load unified client data
   useEffect(() => {
-    loadUnifiedData();
-  }, []);
+    if (user && accessChecked && hasPageAccess) {
+      loadUnifiedData();
+    }
+  }, [user, accessChecked, hasPageAccess]);
+
+  useEffect(() => {
+    if (user && accessChecked && !hasPageAccess) {
+      navigate("/app-selector", { replace: true });
+    }
+  }, [user, accessChecked, hasPageAccess, navigate]);
 
   const loadUnifiedData = async () => {
     try {
@@ -212,7 +231,7 @@ const UnifiedClientDashboard = () => {
   fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"unified-client-blank",runId:"pre-fix",hypothesisId:"E",location:"UnifiedClientDashboard.jsx:render",msg:"[DEBUG] UnifiedClientDashboard render state",data:{loading,userLoading,hasUser:Boolean(user),clientCount:unifiedData?.clients?.length||0,filteredCount:filteredClients?.length||0,error:error||null,isAdmin,isSuperAdmin},ts:Date.now()})}).catch(()=>{});
   // #endregion
 
-  if (userLoading || loading) {
+  if (userLoading || loading || !accessChecked) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <p>Loading...</p>

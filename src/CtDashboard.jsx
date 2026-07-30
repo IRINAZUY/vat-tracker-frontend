@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import UnifiedHeader from "./components/UnifiedHeader";
 import BottomRightLogo from "./components/BottomRightLogo";
+import { findUserProfile, getUserAccessState, hasAppAccess } from "./userAccess";
 
 const CURRENT_CT_PERIOD = "Jan-Dec";
 
@@ -47,6 +48,7 @@ const CtDashboard = () => {
   const [user, loading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [hasPageAccess, setHasPageAccess] = useState(false);
   const [roleResolved, setRoleResolved] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [ctPeriod, setCtPeriod] = useState(CURRENT_CT_PERIOD);
@@ -69,22 +71,16 @@ const CtDashboard = () => {
       }
 
       try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-
-        if (userSnap.exists()) {
-          const userData = userSnap.data();
-          const userRole = userData.role;
-          setIsAdmin(userRole === "admin" || userRole === "superAdmin");
-          setIsSuperAdmin(userRole === "superAdmin");
-        } else {
-          setIsAdmin(false);
-          setIsSuperAdmin(false);
-        }
+        const userData = await findUserProfile(user);
+        const accessState = getUserAccessState(userData || {});
+        setIsAdmin(accessState.isAdmin);
+        setIsSuperAdmin(accessState.isSuperAdmin);
+        setHasPageAccess(hasAppAccess("ctSubmissionTracker", accessState));
       } catch (roleError) {
         console.error("Error checking user status:", roleError);
         setIsAdmin(false);
         setIsSuperAdmin(false);
+        setHasPageAccess(false);
       } finally {
         setRoleResolved(true);
       }
@@ -96,7 +92,7 @@ const CtDashboard = () => {
   useEffect(() => {
     if (!roleResolved || !user) return undefined;
 
-    if (!isAdmin) {
+    if (!hasPageAccess) {
       navigate("/app-selector", { replace: true });
       return undefined;
     }
@@ -139,7 +135,7 @@ const CtDashboard = () => {
       unsubscribeLicenses();
       unsubscribeCtRecords();
     };
-  }, [roleResolved, user, isAdmin, navigate]);
+  }, [roleResolved, user, hasPageAccess, navigate]);
 
   const cycleYear = getCurrentCycleYear();
   const cycleDeadline = getCtDeadlineForYear(cycleYear);

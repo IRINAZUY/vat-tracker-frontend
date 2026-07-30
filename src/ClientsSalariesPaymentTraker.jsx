@@ -10,6 +10,7 @@ import {
   getSalaryPaymentClients,
   saveSalaryPaymentClientRows
 } from "./services/ClientsSalariesPaymentService";
+import { findUserProfile, getUserAccessState, hasAppAccess } from "./userAccess";
 
 const createRowId = () => {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -163,6 +164,7 @@ const getClientCardStyles = (paymentStatus) => {
 const ClientsSalariesPaymentTraker = () => {
   const [user, loading] = useAuthState(auth);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [hasPageAccess, setHasPageAccess] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
   const [clients, setClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(true);
@@ -195,13 +197,14 @@ const ClientsSalariesPaymentTraker = () => {
       }
 
       try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        const role = userSnap.exists() ? userSnap.data()?.role : "";
-        setIsAdmin(role === "admin" || role === "superAdmin");
+        const userData = await findUserProfile(user);
+        const accessState = getUserAccessState(userData || {});
+        setIsAdmin(accessState.isAdmin);
+        setHasPageAccess(hasAppAccess("salaryPaymentTracker", accessState));
       } catch (roleError) {
         console.error("Error checking salary page access:", roleError);
         setIsAdmin(false);
+        setHasPageAccess(false);
       } finally {
         setAccessChecked(true);
       }
@@ -214,7 +217,7 @@ const ClientsSalariesPaymentTraker = () => {
 
   useEffect(() => {
     const loadClients = async () => {
-      if (!user || !isAdmin) {
+      if (!user || !hasPageAccess) {
         setLoadingClients(false);
         return;
       }
@@ -234,7 +237,7 @@ const ClientsSalariesPaymentTraker = () => {
     if (accessChecked) {
       loadClients();
     }
-  }, [user, isAdmin, accessChecked]);
+  }, [user, hasPageAccess, accessChecked]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -1026,7 +1029,7 @@ const ClientsSalariesPaymentTraker = () => {
     );
   }
 
-  if (!isAdmin) {
+  if (!hasPageAccess) {
     return (
       <div style={{ minHeight: "100vh", backgroundColor: "#0B1120" }}>
         <UnifiedHeader title="Clients' Salaries Payment Tracker" userEmail={user.email} />
@@ -1041,7 +1044,7 @@ const ClientsSalariesPaymentTraker = () => {
               textAlign: "center"
             }}
           >
-            Access denied. Only admin users can open this page.
+            Access denied. You do not have permission to open this page.
           </div>
         </div>
       </div>
